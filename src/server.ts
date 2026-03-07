@@ -50,12 +50,16 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
             type: "string",
             enum: ["android", "ios"]
           },
+          id: {
+            type: "string",
+            description: "Android package name or iOS bundle id"
+          },
           lines: {
             type: "number",
             description: "Number of log lines (android only)"
           }
         },
-        required: ["platform"]
+        required: ["platform", "id"]
       }
     }
   ]
@@ -64,35 +68,42 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params
 
-  if (name === "start_app") {
-    const { platform, id } = args as {
-      platform: "android" | "ios"
-      id: string
+  try {
+    if (name === "start_app") {
+      const { platform, id } = args as {
+        platform: "android" | "ios"
+        id: string
+      }
+
+      const result =
+        platform === "android"
+          ? await startAndroidApp(id)
+          : await startIOSApp(id)
+
+      return {
+        content: [{ type: "text", text: result }]
+      }
     }
 
-    const result =
-      platform === "android"
-        ? await startAndroidApp(id)
-        : await startIOSApp(id)
+    if (name === "get_logs") {
+      const { platform, id, lines } = args as {
+        platform: "android" | "ios"
+        id: string
+        lines?: number
+      }
 
+      const logs =
+        platform === "android"
+          ? await getAndroidLogs(id, lines ?? 200)
+          : await getIOSLogs()
+
+      return {
+        content: [{ type: "text", text: logs }]
+      }
+    }
+  } catch (error) {
     return {
-      content: [{ type: "text", text: result }]
-    }
-  }
-
-  if (name === "get_logs") {
-    const { platform, lines } = args as {
-      platform: "android" | "ios"
-      lines?: number
-    }
-
-    const logs =
-      platform === "android"
-        ? await getAndroidLogs(lines ?? 200)
-        : await getIOSLogs()
-
-    return {
-      content: [{ type: "text", text: logs }]
+      content: [{ type: "text", text: `Error executing tool ${name}: ${error instanceof Error ? error.message : String(error)}` }]
     }
   }
 
@@ -100,4 +111,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 })
 
 const transport = new StdioServerTransport()
-await server.connect(transport)
+
+async function main() {
+  await server.connect(transport)
+}
+
+main().catch((error) => {
+  console.error("Server failed to start:", error)
+})
