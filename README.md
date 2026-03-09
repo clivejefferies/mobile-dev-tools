@@ -1,6 +1,8 @@
 # Mobile Debug MCP
 
-**Mobile Debug MCP** is a minimal MCP server for AI-assisted mobile development. It allows you to **launch Android or iOS apps** and **read their logs** from an MCP-compatible AI client.
+**Mobile Debug MCP** is a minimal, secure MCP server for AI-assisted mobile development. It allows you to **launch Android or iOS apps**, **read their logs**, and **inspect UI** from an MCP-compatible AI client.
+
+This server is designed with security in mind, using strict argument handling to prevent shell injection, and reliability, with robust process management to avoid hanging operations.
 
 ---
 
@@ -51,7 +53,27 @@ This option installs the package globally for easy use without cloning the repo.
 
 ---
 
-## MCP Server Configuration
+## Testing
+33. 
+34. The repository includes a smoke test script to verify end-to-end functionality on real devices or simulators.
+35. 
+36. ```bash
+37. # Run smoke test for Android
+38. npx tsx smoke-test.ts android com.example.package
+39. 
+40. # Run smoke test for iOS
+41. npx tsx smoke-test.ts ios com.example.bundleid
+42. ```
+43. 
+44. The smoke test performs the following sequence:
+45. 1. Starts the app
+46. 2. Captures a screenshot
+47. 3. Fetches logs
+48. 4. Terminates the app
+49. 
+50. ---
+51. 
+52. ## MCP Server Configuration
 
 Example WebUI MCP config using `npx --yes` and environment variables:
 
@@ -89,7 +111,8 @@ Launch a mobile app.
 ```json
 {
   "platform": "android" | "ios",
-  "id": "com.example.app" // Android package or iOS bundle ID
+  "appId": "com.example.app", // Android package or iOS bundle ID (Required)
+  "deviceId": "emulator-5554" // Optional: target specific device/simulator
 }
 ```
 
@@ -97,29 +120,34 @@ Launch a mobile app.
 ```json
 {
   "device": { /* device info */ },
-  "result": "success" // or "error", etc.
+  "appStarted": true,
+  "launchTimeMs": 123
 }
 ```
 
 ### get_logs
-Fetch recent logs from the app.
+Fetch recent logs from the app or device.
 
 **Input:**
 ```json
 {
   "platform": "android" | "ios",
-  "id": "com.example.app", // Android package or iOS bundle ID (required)
-  "lines": 200 // optional, Android only
+  "appId": "com.example.app", // Optional: filter logs by app
+  "deviceId": "emulator-5554", // Optional: target specific device
+  "lines": 200 // Optional: number of lines (Android only)
 }
 ```
 
 **Response:**
+Returns two content blocks:
+1. JSON metadata:
 ```json
 {
   "device": { /* device info */ },
-  "logs": "..." // text log output
+  "result": { "lines": 50, "crashLines": [...] }
 }
 ```
+2. Plain text log output.
 
 ### capture_screenshot
 Capture a screenshot of the current device screen.
@@ -128,18 +156,20 @@ Capture a screenshot of the current device screen.
 ```json
 {
   "platform": "android" | "ios",
-  "id": "com.example.app" // Android device/package or iOS simulator/bundle ID
+  "deviceId": "emulator-5554" // Optional: target specific device
 }
 ```
 
 **Response:**
+Returns two content blocks:
+1. JSON metadata:
 ```json
 {
   "device": { /* device info */ },
-  "screenshot": "<base64-encoded PNG data>",
-  "resolution": { "width": 1080, "height": 1920 }
+  "result": { "resolution": { "width": 1080, "height": 1920 } }
 }
 ```
+2. Image content (image/png) containing the raw PNG data.
 
 ### terminate_app
 Terminate a running app.
@@ -148,7 +178,8 @@ Terminate a running app.
 ```json
 {
   "platform": "android" | "ios",
-  "id": "com.example.app" // Android package or iOS bundle ID
+  "appId": "com.example.app", // Android package or iOS bundle ID (Required)
+  "deviceId": "emulator-5554" // Optional
 }
 ```
 
@@ -167,7 +198,8 @@ Restart an app (terminate then launch).
 ```json
 {
   "platform": "android" | "ios",
-  "id": "com.example.app" // Android package or iOS bundle ID
+  "appId": "com.example.app", // Android package or iOS bundle ID (Required)
+  "deviceId": "emulator-5554" // Optional
 }
 ```
 
@@ -187,7 +219,8 @@ Clear app storage (reset to fresh install state).
 ```json
 {
   "platform": "android" | "ios",
-  "id": "com.example.app" // Android package or iOS bundle ID
+  "appId": "com.example.app", // Android package or iOS bundle ID (Required)
+  "deviceId": "emulator-5554" // Optional
 }
 ```
 

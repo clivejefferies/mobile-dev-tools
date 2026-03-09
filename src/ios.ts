@@ -1,4 +1,4 @@
-import { exec } from "child_process"
+import { execFile } from "child_process"
 import { promises as fs } from "fs"
 import { pathToFileURL } from "url"
 import { StartAppResponse, GetLogsResponse, GetCrashResponse, CaptureIOSScreenshotResponse, TerminateAppResponse, RestartAppResponse, ResetAppDataResponse, DeviceInfo } from "./types.js"
@@ -10,28 +10,83 @@ interface IOSResult {
   device: DeviceInfo
 }
 
-function execCommand(command: string): Promise<IOSResult> {
+function execCommand(args: string[], deviceId: string = "booted"): Promise<IOSResult> {
   return new Promise((resolve, reject) => {
-    exec(command, (err, stdout, stderr) => {
-      if (err) reject({ error: stderr.trim(), device: { platform: "ios", id: "booted" } as DeviceInfo })
-      else resolve({ output: stdout.trim(), device: { platform: "ios", id: "booted" } as DeviceInfo })
+    execFile(XCRUN, args, (err, stdout, stderr) => {
+      if (err) {
+        // Reject with a real Error object containing the stderr message
+        reject(new Error(stderr.trim() || err.message))
+      } else {
+        resolve({ output: stdout.trim(), device: { platform: "ios", id: deviceId } as DeviceInfo })
+      }
     })
   })
 }
 
-export async function getIOSDeviceMetadata(): Promise<DeviceInfo> {
-  return {
-    platform: "ios",
-    id: "booted",
-    osVersion: "iOS 16.4",
-    model: "iPhone 14",
-    simulator: true,
+function parseRuntimeName(runtime: string): string {
+  // Example: com.apple.CoreSimulator.SimRuntime.iOS-17-0 -> iOS 17.0
+  try {
+    const parts = runtime.split('.')
+    const lastPart = parts[parts.length - 1]
+    return lastPart.replace(/-/g, ' ').replace('iOS ', 'iOS ') // Keep iOS prefix
+  } catch {
+    return runtime
   }
 }
 
-export async function startIOSApp(bundleId: string): Promise<StartAppResponse> {
-  const result = await execCommand(`${XCRUN} simctl launch booted ${bundleId}`)
-  const device = await getIOSDeviceMetadata()
+export async function getIOSDeviceMetadata(deviceId: string = "booted"): Promise<DeviceInfo> {
+  return new Promise((resolve) => {
+    // If deviceId is provided (and not "booted"), we could try to list just that device.
+    // But listing all booted devices is usually fine to find the one we want or just one.
+    // Let's stick to listing all and filtering if needed, or just return basic info if we can't find it.
+    execFile(XCRUN, ['simctl', 'list', 'devices', 'booted', '--json'], (err, stdout) => {
+      // Default fallback
+      const fallback: DeviceInfo = {
+        platform: "ios",
+        id: deviceId,
+        osVersion: "Unknown",
+        model: "Simulator",
+        simulator: true,
+      }
+
+      if (err || !stdout) {
+        resolve(fallback)
+        return
+      }
+
+      try {
+        const data = JSON.parse(stdout)
+        const devicesMap = data.devices || {}
+        
+        // Find the device
+        for (const runtime in devicesMap) {
+          const devices = devicesMap[runtime]
+          if (Array.isArray(devices)) {
+            for (const device of devices) {
+              if (deviceId === "booted" || device.udid === deviceId) {
+                 resolve({
+                  platform: "ios",
+                  id: device.udid,
+                  osVersion: parseRuntimeName(runtime),
+                  model: device.name,
+                  simulator: true,
+                })
+                return
+              }
+            }
+          }
+        }
+        resolve(fallback)
+      } catch (error) {
+        resolve(fallback)
+      }
+    })
+  })
+}
+
+export async function startIOSApp(bundleId: string, deviceId: string = "booted"): Promise<StartAppResponse> {
+  const result = await execCommand(['simctl', 'launch', deviceId, bundleId], deviceId)
+  const device = await getIOSDeviceMetadata(deviceId)
   // Simulate launch time and appStarted for demonstration
   return {
     device,
@@ -40,18 +95,18 @@ export async function startIOSApp(bundleId: string): Promise<StartAppResponse> {
   }
 }
 
-export async function terminateIOSApp(bundleId: string): Promise<TerminateAppResponse> {
-  await execCommand(`${XCRUN} simctl terminate booted ${bundleId}`)
-  const device = await getIOSDeviceMetadata()
+export async function terminateIOSApp(bundleId: string, deviceId: string = "booted"): Promise<TerminateAppResponse> {
+  await execCommand(['simctl', 'terminate', deviceId, bundleId], deviceId)
+  const device = await getIOSDeviceMetadata(deviceId)
   return {
     device,
     appTerminated: true
   }
 }
 
-export async function restartIOSApp(bundleId: string): Promise<RestartAppResponse> {
-  await terminateIOSApp(bundleId)
-  const startResult = await startIOSApp(bundleId)
+export async function restartIOSApp(bundleId: string, deviceId: string = "booted"): Promise<RestartAppResponse> {
+  await terminateIOSApp(bundleId, deviceId)
+  const startResult = await startIOSApp(bundleId, deviceId)
   return {
     device: startResult.device,
     appRestarted: startResult.appStarted,
@@ -59,12 +114,12 @@ export async function restartIOSApp(bundleId: string): Promise<RestartAppRespons
   }
 }
 
-export async function resetIOSAppData(bundleId: string): Promise<ResetAppDataResponse> {
-  await terminateIOSApp(bundleId)
-  const device = await getIOSDeviceMetadata()
+export async function resetIOSAppData(bundleId: string, deviceId: string = "booted"): Promise<ResetAppDataResponse> {
+  await terminateIOSApp(bundleId, deviceId)
+  const device = await getIOSDeviceMetadata(deviceId)
   
   // Get data container path
-  const containerResult = await execCommand(`${XCRUN} simctl get_app_container booted ${bundleId} data`)
+  const containerResult = await execCommand(['simctl', 'get_app_container', deviceId, bundleId, 'data'], deviceId)
   const dataPath = containerResult.output.trim()
   
   if (!dataPath) {
@@ -95,9 +150,17 @@ export async function resetIOSAppData(bundleId: string): Promise<ResetAppDataRes
   }
 }
 
-export async function getIOSLogs(): Promise<GetLogsResponse> {
-  const result = await execCommand(`${XCRUN} simctl spawn booted log show --style syslog --last 1m`)
-  const device = await getIOSDeviceMetadata()
+export async function getIOSLogs(appId?: string, deviceId: string = "booted"): Promise<GetLogsResponse> {
+  // If appId is provided, use predicate filtering
+  // Note: execFile passes args directly, so we don't need shell escaping for the predicate string itself,
+  // but we do need to construct the predicate correctly for log show.
+  const args = ['simctl', 'spawn', deviceId, 'log', 'show', '--style', 'syslog', '--last', '1m']
+  if (appId) {
+    args.push('--predicate', `subsystem contains "${appId}" or process == "${appId}"`)
+  }
+  
+  const result = await execCommand(args, deviceId)
+  const device = await getIOSDeviceMetadata(deviceId)
   const logs = result.output ? result.output.split('\n') : []
   return {
     device,
@@ -107,17 +170,31 @@ export async function getIOSLogs(): Promise<GetLogsResponse> {
 }
 
 
-export async function captureIOSScreenshot(): Promise<CaptureIOSScreenshotResponse> {
-  const device = await getIOSDeviceMetadata()
-  // Take screenshot to stdout as base64 (simctl does not output base64 directly; this is a simulation)
-  // In practice, you'd need to save to a temp file and read as base64
-  // For demonstration, we'll simulate the base64 string and resolution
-  const fakeBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAUA" // Truncated PNG header (full size)
-  // Simulate downsampling by truncating base64 string to represent smaller image preview
-  const downsampledBase64 = fakeBase64.substring(0, Math.floor(fakeBase64.length / 3))
-  return {
-    device,
-    screenshot: downsampledBase64,
-    resolution: { width: 375, height: 812 },
+export async function captureIOSScreenshot(deviceId: string = "booted"): Promise<CaptureIOSScreenshotResponse> {
+  const device = await getIOSDeviceMetadata(deviceId)
+  const tmpFile = `/tmp/mcp-ios-screenshot-${Date.now()}.png`
+
+  try {
+    // 1. Capture screenshot to temp file
+    await execCommand(['simctl', 'io', deviceId, 'screenshot', tmpFile], deviceId)
+    
+    // 2. Read file as base64
+    const buffer = await fs.readFile(tmpFile)
+    const base64 = buffer.toString('base64')
+    
+    // 3. Clean up
+    await fs.rm(tmpFile).catch(() => {})
+
+    return {
+      device,
+      screenshot: base64,
+      // Default resolution since we can't easily parse it without extra libs
+      // Clients will read the real dimensions from the PNG header anyway
+      resolution: { width: 0, height: 0 },
+    }
+  } catch (err) {
+    // Ensure cleanup happens even on error
+    await fs.rm(tmpFile).catch(() => {})
+    throw new Error(`Failed to capture screenshot: ${err instanceof Error ? err.message : String(err)}`)
   }
 }

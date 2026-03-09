@@ -50,12 +50,16 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
             type: "string",
             enum: ["android", "ios"]
           },
-          id: {
+          appId: {
             type: "string",
             description: "Android package name or iOS bundle id"
+          },
+          deviceId: {
+            type: "string",
+            description: "Device UDID (iOS) or Serial (Android). Defaults to booted/connected."
           }
         },
-        required: ["platform", "id"]
+        required: ["platform", "appId"]
       }
     },
     {
@@ -68,12 +72,16 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
             type: "string",
             enum: ["android", "ios"]
           },
-          id: {
+          appId: {
             type: "string",
             description: "Android package name or iOS bundle id"
+          },
+          deviceId: {
+            type: "string",
+            description: "Device UDID (iOS) or Serial (Android). Defaults to booted/connected."
           }
         },
-        required: ["platform", "id"]
+        required: ["platform", "appId"]
       }
     },
     {
@@ -86,12 +94,16 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
             type: "string",
             enum: ["android", "ios"]
           },
-          id: {
+          appId: {
             type: "string",
             description: "Android package name or iOS bundle id"
+          },
+          deviceId: {
+            type: "string",
+            description: "Device UDID (iOS) or Serial (Android). Defaults to booted/connected."
           }
         },
-        required: ["platform", "id"]
+        required: ["platform", "appId"]
       }
     },
     {
@@ -104,12 +116,16 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
             type: "string",
             enum: ["android", "ios"]
           },
-          id: {
+          appId: {
             type: "string",
             description: "Android package name or iOS bundle id"
+          },
+          deviceId: {
+            type: "string",
+            description: "Device UDID (iOS) or Serial (Android). Defaults to booted/connected."
           }
         },
-        required: ["platform", "id"]
+        required: ["platform", "appId"]
       }
     },
     {
@@ -122,16 +138,20 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
             type: "string",
             enum: ["android", "ios"]
           },
-          id: {
+          appId: {
             type: "string",
-            description: "Android package name or iOS bundle id"
+            description: "Filter by Android package name or iOS bundle id"
+          },
+          deviceId: {
+            type: "string",
+            description: "Device UDID (iOS) or Serial (Android). Defaults to booted/connected."
           },
           lines: {
             type: "number",
             description: "Number of log lines (android only)"
           }
         },
-        required: ["platform", "id"]
+        required: ["platform"]
       }
     },
     {
@@ -144,12 +164,12 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
             type: "string",
             enum: ["android", "ios"]
           },
-          id: {
+          deviceId: {
             type: "string",
-            description: "Android device/package id or iOS simulator/bundle id"
+            description: "Device UDID (iOS) or Serial (Android). Defaults to booted/connected."
           }
         },
-        required: ["platform", "id"]
+        required: ["platform"]
       }
     }
   ]
@@ -160,9 +180,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
   try {
     if (name === "start_app") {
-      const { platform, id } = args as {
+      const { platform, appId, deviceId } = args as {
         platform: "android" | "ios"
-        id: string
+        appId: string
+        deviceId?: string
       }
 
       let appStarted: boolean
@@ -170,15 +191,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       let deviceInfo: DeviceInfo
 
       if (platform === "android") {
-        const result = await startAndroidApp(id)
+        const result = await startAndroidApp(appId, deviceId)
         appStarted = result.appStarted
         launchTimeMs = result.launchTimeMs
-        deviceInfo = await getAndroidDeviceMetadata(id)
+        deviceInfo = await getAndroidDeviceMetadata(appId, deviceId)
       } else {
-        const result = await startIOSApp(id)
+        const result = await startIOSApp(appId, deviceId)
         appStarted = result.appStarted
         launchTimeMs = result.launchTimeMs
-        deviceInfo = await getIOSDeviceMetadata()
+        deviceInfo = await getIOSDeviceMetadata(deviceId)
       }
 
       const response: StartAppResponse = {
@@ -191,22 +212,23 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     if (name === "terminate_app") {
-      const { platform, id } = args as {
+      const { platform, appId, deviceId } = args as {
         platform: "android" | "ios"
-        id: string
+        appId: string
+        deviceId?: string
       }
 
       let appTerminated: boolean
       let deviceInfo: DeviceInfo
 
       if (platform === "android") {
-        const result = await terminateAndroidApp(id)
+        const result = await terminateAndroidApp(appId, deviceId)
         appTerminated = result.appTerminated
-        deviceInfo = await getAndroidDeviceMetadata(id)
+        deviceInfo = await getAndroidDeviceMetadata(appId, deviceId)
       } else {
-        const result = await terminateIOSApp(id)
+        const result = await terminateIOSApp(appId, deviceId)
         appTerminated = result.appTerminated
-        deviceInfo = await getIOSDeviceMetadata()
+        deviceInfo = await getIOSDeviceMetadata(deviceId)
       }
 
       const response: TerminateAppResponse = {
@@ -218,9 +240,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     if (name === "restart_app") {
-      const { platform, id } = args as {
+      const { platform, appId, deviceId } = args as {
         platform: "android" | "ios"
-        id: string
+        appId: string
+        deviceId?: string
       }
 
       let appRestarted: boolean
@@ -228,15 +251,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       let deviceInfo: DeviceInfo
 
       if (platform === "android") {
-        const result = await restartAndroidApp(id)
+        const result = await restartAndroidApp(appId, deviceId)
         appRestarted = result.appRestarted
         launchTimeMs = result.launchTimeMs
-        deviceInfo = await getAndroidDeviceMetadata(id)
+        deviceInfo = await getAndroidDeviceMetadata(appId, deviceId)
       } else {
-        const result = await restartIOSApp(id)
+        const result = await restartIOSApp(appId, deviceId)
         appRestarted = result.appRestarted
         launchTimeMs = result.launchTimeMs
-        deviceInfo = await getIOSDeviceMetadata()
+        deviceInfo = await getIOSDeviceMetadata(deviceId)
       }
 
       const response: RestartAppResponse = {
@@ -249,22 +272,23 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     if (name === "reset_app_data") {
-      const { platform, id } = args as {
+      const { platform, appId, deviceId } = args as {
         platform: "android" | "ios"
-        id: string
+        appId: string
+        deviceId?: string
       }
 
       let dataCleared: boolean
       let deviceInfo: DeviceInfo
 
       if (platform === "android") {
-        const result = await resetAndroidAppData(id)
+        const result = await resetAndroidAppData(appId, deviceId)
         dataCleared = result.dataCleared
-        deviceInfo = await getAndroidDeviceMetadata(id)
+        deviceInfo = await getAndroidDeviceMetadata(appId, deviceId)
       } else {
-        const result = await resetIOSAppData(id)
+        const result = await resetIOSAppData(appId, deviceId)
         dataCleared = result.dataCleared
-        deviceInfo = await getIOSDeviceMetadata()
+        deviceInfo = await getIOSDeviceMetadata(deviceId)
       }
 
       const response: ResetAppDataResponse = {
@@ -276,9 +300,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     if (name === "get_logs") {
-      const { platform, id, lines } = args as {
+      const { platform, appId, deviceId, lines } = args as {
         platform: "android" | "ios"
-        id: string
+        appId?: string
+        deviceId?: string
         lines?: number
       }
 
@@ -286,12 +311,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       let deviceInfo: DeviceInfo
 
       if (platform === "android") {
-        deviceInfo = await getAndroidDeviceMetadata(id)
-        const response = await getAndroidLogs(id, lines ?? 200)
+        deviceInfo = await getAndroidDeviceMetadata(appId || "", deviceId)
+        const response = await getAndroidLogs(appId, lines ?? 200, deviceId)
         logs = Array.isArray(response.logs) ? response.logs : []
       } else {
-        deviceInfo = await getIOSDeviceMetadata()
-        const response = await getIOSLogs()
+        deviceInfo = await getIOSDeviceMetadata(deviceId)
+        const response = await getIOSLogs(appId, deviceId)
         logs = Array.isArray(response.logs) ? response.logs : []
       }
 
@@ -306,7 +331,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             text: JSON.stringify({
               device: deviceInfo,
               result: {
-                lines: logs.length
+                lines: logs.length,
+                crashLines: crashLines.length > 0 ? crashLines : undefined
               }
             }, null, 2)
           },
@@ -319,20 +345,20 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     if (name === "capture_screenshot") {
-      const { platform, id } = args as { platform: "android" | "ios"; id: string }
+      const { platform, deviceId } = args as { platform: "android" | "ios"; deviceId?: string }
 
       let screenshot: string
       let resolution: { width: number; height: number }
       let deviceInfo: DeviceInfo
 
       if (platform === "android") {
-        deviceInfo = await getAndroidDeviceMetadata(id)
-        const result = await captureAndroidScreen(id)
+        deviceInfo = await getAndroidDeviceMetadata("", deviceId)
+        const result = await captureAndroidScreen(deviceId)
         screenshot = result.screenshot
         resolution = result.resolution
       } else {
-        deviceInfo = await getIOSDeviceMetadata()
-        const result = await captureIOSScreenshot()
+        deviceInfo = await getIOSDeviceMetadata(deviceId)
+        const result = await captureIOSScreenshot(deviceId)
         screenshot = result.screenshot
         resolution = result.resolution
       }

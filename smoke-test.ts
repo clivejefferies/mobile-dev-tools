@@ -47,7 +47,7 @@ async function main() {
     let resolution: { width: number; height: number };
 
     if (platform === "android") {
-      const result = await captureAndroidScreen(appId);
+      const result = await captureAndroidScreen();
       screenshotBase64 = result.screenshot;
       resolution = result.resolution;
     } else {

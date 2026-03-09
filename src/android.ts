@@ -1,61 +1,108 @@
-import { exec } from "child_process"
+import { execFile, spawn } from "child_process"
 import { StartAppResponse, GetLogsResponse, CaptureAndroidScreenResponse, TerminateAppResponse, RestartAppResponse, ResetAppDataResponse, DeviceInfo } from "./types.js"
 
 const ADB = process.env.ADB_PATH || "adb"
 
-function getDeviceInfo(pkg: string, metadata: Partial<DeviceInfo> = {}): DeviceInfo {
+// Helper to construct ADB args with optional device ID
+function getAdbArgs(args: string[], deviceId?: string): string[] {
+  if (deviceId) {
+    return ['-s', deviceId, ...args]
+  }
+  return args
+}
+
+function execAdb(args: string[], deviceId?: string, options: any = {}): Promise<string> {
+  const adbArgs = getAdbArgs(args, deviceId)
+  return new Promise((resolve, reject) => {
+    // Use spawn instead of execFile for better stream control and to avoid potential buffering hangs
+    const child = spawn(ADB, adbArgs, options)
+    
+    let stdout = ''
+    let stderr = ''
+
+    if (child.stdout) {
+      child.stdout.on('data', (data) => {
+        stdout += data.toString()
+      })
+    }
+
+    if (child.stderr) {
+      child.stderr.on('data', (data) => {
+        stderr += data.toString()
+      })
+    }
+
+    const timeoutMs = args.includes('logcat') ? 10000 : 2000 // Shorter timeout for metadata queries
+    const timeout = setTimeout(() => {
+      child.kill()
+      reject(new Error(`ADB command timed out after ${timeoutMs}ms: ${args.join(' ')}`))
+    }, timeoutMs)
+
+    child.on('close', (code) => {
+      clearTimeout(timeout)
+      if (code !== 0) {
+        // If there's an actual error (non-zero exit code), reject
+        reject(new Error(stderr.trim() || `Command failed with code ${code}`))
+      } else {
+        // If exit code is 0, resolve with stdout
+        resolve(stdout.trim())
+      }
+    })
+
+    child.on('error', (err) => {
+      clearTimeout(timeout)
+      reject(err)
+    })
+  })
+}
+
+function getDeviceInfo(deviceId: string, metadata: Partial<DeviceInfo> = {}): DeviceInfo {
   return { 
     platform: 'android', 
-    id: pkg, 
+    id: deviceId || 'default', 
     osVersion: metadata.osVersion || '', 
     model: metadata.model || '', 
     simulator: metadata.simulator || false 
   }
 }
 
-export function getAndroidDeviceMetadata(pkg: string): Promise<DeviceInfo> {
-  return new Promise((resolve) => {
-    exec(`${ADB} shell getprop ro.build.version.release`, (verErr, verStdout) => {
-      const osVersion = verErr ? '' : verStdout.trim() || ''
-      exec(`${ADB} shell getprop ro.product.model`, (modelErr, modelStdout) => {
-        const model = modelErr ? '' : modelStdout.trim() || ''
-        exec(`${ADB} shell getprop ro.kernel.qemu`, (simErr, simStdout) => {
-          const simulator = simErr ? false : simStdout.trim() === '1'
-          resolve({ platform: 'android', id: pkg, osVersion, model, simulator })
-        })
-      })
-    })
-  })
+export async function getAndroidDeviceMetadata(appId: string, deviceId?: string): Promise<DeviceInfo> {
+  try {
+    // Run these in parallel to avoid sequential timeouts
+    const [osVersion, model, simOutput] = await Promise.all([
+      execAdb(['shell', 'getprop', 'ro.build.version.release'], deviceId).catch(() => ''),
+      execAdb(['shell', 'getprop', 'ro.product.model'], deviceId).catch(() => ''),
+      execAdb(['shell', 'getprop', 'ro.kernel.qemu'], deviceId).catch(() => '0')
+    ])
+    
+    const simulator = simOutput === '1'
+    return { platform: 'android', id: deviceId || 'default', osVersion, model, simulator }
+  } catch (e) {
+    return { platform: 'android', id: deviceId || 'default', osVersion: '', model: '', simulator: false }
+  }
 }
 
-export async function startAndroidApp(pkg: string): Promise<StartAppResponse> {
-  const metadata = await getAndroidDeviceMetadata(pkg)
-  const deviceInfo = getDeviceInfo(pkg, metadata)
-  return new Promise((resolve, reject) => {
-    exec(
-      `${ADB} shell monkey -p ${pkg} -c android.intent.category.LAUNCHER 1`,
-      (err, stdout, stderr) => {
-        if (err) reject(stderr)
-        else resolve({ device: deviceInfo, appStarted: true, launchTimeMs: 1000 })
-      }
-    )
-  })
+export async function startAndroidApp(appId: string, deviceId?: string): Promise<StartAppResponse> {
+  const metadata = await getAndroidDeviceMetadata(appId, deviceId)
+  const deviceInfo = getDeviceInfo(deviceId || 'default', metadata)
+  
+  await execAdb(['shell', 'monkey', '-p', appId, '-c', 'android.intent.category.LAUNCHER', '1'], deviceId)
+  
+  return { device: deviceInfo, appStarted: true, launchTimeMs: 1000 }
 }
 
-export async function terminateAndroidApp(pkg: string): Promise<TerminateAppResponse> {
-  const metadata = await getAndroidDeviceMetadata(pkg)
-  const deviceInfo = getDeviceInfo(pkg, metadata)
-  return new Promise((resolve, reject) => {
-    exec(`${ADB} shell am force-stop ${pkg}`, (err, stdout, stderr) => {
-      if (err) reject(stderr)
-      else resolve({ device: deviceInfo, appTerminated: true })
-    })
-  })
+export async function terminateAndroidApp(appId: string, deviceId?: string): Promise<TerminateAppResponse> {
+  const metadata = await getAndroidDeviceMetadata(appId, deviceId)
+  const deviceInfo = getDeviceInfo(deviceId || 'default', metadata)
+
+  await execAdb(['shell', 'am', 'force-stop', appId], deviceId)
+  
+  return { device: deviceInfo, appTerminated: true }
 }
 
-export async function restartAndroidApp(pkg: string): Promise<RestartAppResponse> {
-  await terminateAndroidApp(pkg)
-  const startResult = await startAndroidApp(pkg)
+export async function restartAndroidApp(appId: string, deviceId?: string): Promise<RestartAppResponse> {
+  await terminateAndroidApp(appId, deviceId)
+  const startResult = await startAndroidApp(appId, deviceId)
   return {
     device: startResult.device,
     appRestarted: startResult.appStarted,
@@ -63,59 +110,66 @@ export async function restartAndroidApp(pkg: string): Promise<RestartAppResponse
   }
 }
 
-export async function resetAndroidAppData(pkg: string): Promise<ResetAppDataResponse> {
-  const metadata = await getAndroidDeviceMetadata(pkg)
-  const deviceInfo = getDeviceInfo(pkg, metadata)
-  return new Promise((resolve, reject) => {
-    exec(`${ADB} shell pm clear ${pkg}`, (err, stdout, stderr) => {
-      if (err) reject(stderr)
-      else resolve({ device: deviceInfo, dataCleared: stdout.trim() === 'Success' })
-    })
-  })
+export async function resetAndroidAppData(appId: string, deviceId?: string): Promise<ResetAppDataResponse> {
+  const metadata = await getAndroidDeviceMetadata(appId, deviceId)
+  const deviceInfo = getDeviceInfo(deviceId || 'default', metadata)
+
+  const output = await execAdb(['shell', 'pm', 'clear', appId], deviceId)
+  
+  return { device: deviceInfo, dataCleared: output === 'Success' }
 }
 
-export async function getAndroidLogs(pkg: string, lines = 200): Promise<GetLogsResponse> {
-  const metadata = await getAndroidDeviceMetadata(pkg)
-  const deviceInfo = getDeviceInfo(pkg, metadata)
-  return new Promise((resolve) => {
-    exec(`${ADB} logcat -d -t ${lines} -v threadtime`, (err, stdout) => {
-      if (err) {
-        resolve({ device: deviceInfo, logs: [], logCount: 0 })
+export async function getAndroidLogs(appId?: string, lines = 200, deviceId?: string): Promise<GetLogsResponse> {
+  const metadata = await getAndroidDeviceMetadata(appId || "", deviceId)
+  const deviceInfo = getDeviceInfo(deviceId || 'default', metadata)
+
+  try {
+    // We'll skip PID lookup for now to avoid potential hangs with 'pidof' on some emulators
+    // and rely on robust string matching against the log line.
+    
+    // Get logs
+    const stdout = await execAdb(['logcat', '-d', '-t', lines.toString(), '-v', 'threadtime'], deviceId)
+    const allLogs = stdout.split('\n')
+    
+    let filteredLogs = allLogs
+    if (appId) {
+       // Filter by checking if the line contains the appId string.
+       filteredLogs = allLogs.filter(line => line.includes(appId))
+       
+       // If standard filtering fails, we could try a regex for the PID pattern if we had the PID.
+       // For now, let's just return what we matched. The user's logs showed the package name clearly present.
+    }
+    
+    return { device: deviceInfo, logs: filteredLogs, logCount: filteredLogs.length }
+  } catch (e) {
+    console.error("Error fetching logs:", e)
+    return { device: deviceInfo, logs: [], logCount: 0 }
+  }
+}
+
+export async function captureAndroidScreen(deviceId?: string): Promise<CaptureAndroidScreenResponse> {
+  const metadata = await getAndroidDeviceMetadata("", deviceId)
+  const deviceInfo: DeviceInfo = getDeviceInfo(deviceId || 'default', metadata)
+
+  return new Promise((resolve, reject) => {
+    const adbArgs = getAdbArgs(['exec-out', 'screencap', '-p'], deviceId)
+    
+    execFile(ADB, adbArgs, { encoding: 'buffer' }, (err, stdout, stderr) => {
+       if (err) {
+        reject(new Error(stderr.toString() || err.message))
         return
       }
-      const allLogs = typeof stdout === 'string' ? stdout.split('\n') : []
-      let filteredLogs = allLogs.filter(line => typeof line === 'string' && line.includes(pkg))
-      if (filteredLogs.length === 0) {
-        filteredLogs = allLogs.slice(-lines)
-      }
-      const logs = filteredLogs || []
-      const logCount = logs.length || 0
-      resolve({ device: deviceInfo, logs, logCount })
-    })
-  })
-}
 
-export async function captureAndroidScreen(pkg?: string): Promise<CaptureAndroidScreenResponse> {
-  const metadata = await getAndroidDeviceMetadata(pkg || '')
-  const deviceInfo: DeviceInfo = getDeviceInfo(pkg || '', metadata)
-  return new Promise((resolve, reject) => {
-    exec(`${ADB} exec-out screencap -p`, { encoding: 'buffer' }, (err, stdout, stderr) => {
-      if (err) {
-        reject(stderr || err.message)
-      } else {
-        // Convert raw screenshot buffer to base64
-        const screenshotBase64 = stdout.toString('base64')
+      const screenshotBase64 = stdout.toString('base64')
 
-        // Attempt to get screen resolution via adb shell wm size
-        exec(`${ADB} shell wm size`, (sizeErr, sizeStdout, sizeStderr) => {
+      execAdb(['shell', 'wm', 'size'], deviceId)
+        .then(sizeStdout => {
           let width = 0
           let height = 0
-          if (!sizeErr && sizeStdout) {
-            const match = sizeStdout.match(/Physical size: (\d+)x(\d+)/)
-            if (match) {
-              width = parseInt(match[1], 10)
-              height = parseInt(match[2], 10)
-            }
+          const match = sizeStdout.match(/Physical size: (\d+)x(\d+)/)
+          if (match) {
+            width = parseInt(match[1], 10)
+            height = parseInt(match[2], 10)
           }
           resolve({
             device: deviceInfo,
@@ -123,7 +177,13 @@ export async function captureAndroidScreen(pkg?: string): Promise<CaptureAndroid
             resolution: { width, height }
           })
         })
-      }
+        .catch(() => {
+           resolve({
+            device: deviceInfo,
+            screenshot: screenshotBase64,
+            resolution: { width: 0, height: 0 }
+          })
+        })
     })
   })
 }
