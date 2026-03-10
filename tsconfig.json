@@ -7,5 +7,6 @@
     "moduleResolution": "NodeNext",
     "strict": true,
     "esModuleInterop": true
-  }
+  },
+  "exclude": ["smoke-test.ts"]
 }

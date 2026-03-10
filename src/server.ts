@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import { Server } from "@modelcontextprotocol/sdk/server/index.js"
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import {
@@ -5,13 +6,21 @@ import {
   CallToolRequestSchema
 } from "@modelcontextprotocol/sdk/types.js"
 
-import { startAndroidApp, getAndroidLogs } from "./android.js"
-import { startIOSApp, getIOSLogs } from "./ios.js"
+import {
+  StartAppResponse,
+  DeviceInfo,
+  TerminateAppResponse,
+  RestartAppResponse,
+  ResetAppDataResponse
+} from "./types.js"
+
+import { startAndroidApp, getAndroidLogs, captureAndroidScreen, getAndroidDeviceMetadata, terminateAndroidApp, restartAndroidApp, resetAndroidAppData } from "./android.js"
+import { startIOSApp, getIOSLogs, captureIOSScreenshot, getIOSDeviceMetadata, terminateIOSApp, restartIOSApp, resetIOSAppData } from "./ios.js"
 
 const server = new Server(
   {
     name: "mobile-debug-mcp",
-    version: "0.1.0"
+    version: "0.4.0"
   },
   {
     capabilities: {
@@ -19,6 +28,15 @@ const server = new Server(
     }
   }
 )
+
+function wrapResponse<T>(data: T) {
+  return {
+    content: [{
+      type: "text" as const,
+      text: JSON.stringify(data, null, 2)
+    }]
+  }
+}
 
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
   tools: [
@@ -32,17 +50,21 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
             type: "string",
             enum: ["android", "ios"]
           },
-          id: {
+          appId: {
             type: "string",
             description: "Android package name or iOS bundle id"
+          },
+          deviceId: {
+            type: "string",
+            description: "Device UDID (iOS) or Serial (Android). Defaults to booted/connected."
           }
         },
-        required: ["platform", "id"]
+        required: ["platform", "appId"]
       }
     },
     {
-      name: "get_logs",
-      description: "Get recent logs from Android or iOS simulator",
+      name: "terminate_app",
+      description: "Terminate a mobile app on Android or iOS simulator",
       inputSchema: {
         type: "object",
         properties: {
@@ -50,16 +72,104 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
             type: "string",
             enum: ["android", "ios"]
           },
-          id: {
+          appId: {
             type: "string",
             description: "Android package name or iOS bundle id"
+          },
+          deviceId: {
+            type: "string",
+            description: "Device UDID (iOS) or Serial (Android). Defaults to booted/connected."
+          }
+        },
+        required: ["platform", "appId"]
+      }
+    },
+    {
+      name: "restart_app",
+      description: "Restart a mobile app on Android or iOS simulator",
+      inputSchema: {
+        type: "object",
+        properties: {
+          platform: {
+            type: "string",
+            enum: ["android", "ios"]
+          },
+          appId: {
+            type: "string",
+            description: "Android package name or iOS bundle id"
+          },
+          deviceId: {
+            type: "string",
+            description: "Device UDID (iOS) or Serial (Android). Defaults to booted/connected."
+          }
+        },
+        required: ["platform", "appId"]
+      }
+    },
+    {
+      name: "reset_app_data",
+      description: "Reset app data (clear storage) for a mobile app on Android or iOS simulator",
+      inputSchema: {
+        type: "object",
+        properties: {
+          platform: {
+            type: "string",
+            enum: ["android", "ios"]
+          },
+          appId: {
+            type: "string",
+            description: "Android package name or iOS bundle id"
+          },
+          deviceId: {
+            type: "string",
+            description: "Device UDID (iOS) or Serial (Android). Defaults to booted/connected."
+          }
+        },
+        required: ["platform", "appId"]
+      }
+    },
+    {
+      name: "get_logs",
+      description: "Get recent logs from Android or iOS simulator. Returns device metadata and the log output.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          platform: {
+            type: "string",
+            enum: ["android", "ios"]
+          },
+          appId: {
+            type: "string",
+            description: "Filter by Android package name or iOS bundle id"
+          },
+          deviceId: {
+            type: "string",
+            description: "Device UDID (iOS) or Serial (Android). Defaults to booted/connected."
           },
           lines: {
             type: "number",
             description: "Number of log lines (android only)"
           }
         },
-        required: ["platform", "id"]
+        required: ["platform"]
+      }
+    },
+    {
+      name: "capture_screenshot",
+      description: "Capture a screenshot from an Android device or iOS simulator. Returns device metadata and the screenshot image.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          platform: {
+            type: "string",
+            enum: ["android", "ios"]
+          },
+          deviceId: {
+            type: "string",
+            description: "Device UDID (iOS) or Serial (Android). Defaults to booted/connected."
+          }
+        },
+        required: ["platform"]
       }
     }
   ]
@@ -70,35 +180,206 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
   try {
     if (name === "start_app") {
-      const { platform, id } = args as {
+      const { platform, appId, deviceId } = args as {
         platform: "android" | "ios"
-        id: string
+        appId: string
+        deviceId?: string
       }
 
-      const result =
-        platform === "android"
-          ? await startAndroidApp(id)
-          : await startIOSApp(id)
+      let appStarted: boolean
+      let launchTimeMs: number
+      let deviceInfo: DeviceInfo
 
-      return {
-        content: [{ type: "text", text: result }]
+      if (platform === "android") {
+        const result = await startAndroidApp(appId, deviceId)
+        appStarted = result.appStarted
+        launchTimeMs = result.launchTimeMs
+        deviceInfo = await getAndroidDeviceMetadata(appId, deviceId)
+      } else {
+        const result = await startIOSApp(appId, deviceId)
+        appStarted = result.appStarted
+        launchTimeMs = result.launchTimeMs
+        deviceInfo = await getIOSDeviceMetadata(deviceId)
       }
+
+      const response: StartAppResponse = {
+        device: deviceInfo,
+        appStarted,
+        launchTimeMs
+      }
+
+      return wrapResponse(response)
+    }
+
+    if (name === "terminate_app") {
+      const { platform, appId, deviceId } = args as {
+        platform: "android" | "ios"
+        appId: string
+        deviceId?: string
+      }
+
+      let appTerminated: boolean
+      let deviceInfo: DeviceInfo
+
+      if (platform === "android") {
+        const result = await terminateAndroidApp(appId, deviceId)
+        appTerminated = result.appTerminated
+        deviceInfo = await getAndroidDeviceMetadata(appId, deviceId)
+      } else {
+        const result = await terminateIOSApp(appId, deviceId)
+        appTerminated = result.appTerminated
+        deviceInfo = await getIOSDeviceMetadata(deviceId)
+      }
+
+      const response: TerminateAppResponse = {
+        device: deviceInfo,
+        appTerminated
+      }
+
+      return wrapResponse(response)
+    }
+
+    if (name === "restart_app") {
+      const { platform, appId, deviceId } = args as {
+        platform: "android" | "ios"
+        appId: string
+        deviceId?: string
+      }
+
+      let appRestarted: boolean
+      let launchTimeMs: number
+      let deviceInfo: DeviceInfo
+
+      if (platform === "android") {
+        const result = await restartAndroidApp(appId, deviceId)
+        appRestarted = result.appRestarted
+        launchTimeMs = result.launchTimeMs
+        deviceInfo = await getAndroidDeviceMetadata(appId, deviceId)
+      } else {
+        const result = await restartIOSApp(appId, deviceId)
+        appRestarted = result.appRestarted
+        launchTimeMs = result.launchTimeMs
+        deviceInfo = await getIOSDeviceMetadata(deviceId)
+      }
+
+      const response: RestartAppResponse = {
+        device: deviceInfo,
+        appRestarted,
+        launchTimeMs
+      }
+
+      return wrapResponse(response)
+    }
+
+    if (name === "reset_app_data") {
+      const { platform, appId, deviceId } = args as {
+        platform: "android" | "ios"
+        appId: string
+        deviceId?: string
+      }
+
+      let dataCleared: boolean
+      let deviceInfo: DeviceInfo
+
+      if (platform === "android") {
+        const result = await resetAndroidAppData(appId, deviceId)
+        dataCleared = result.dataCleared
+        deviceInfo = await getAndroidDeviceMetadata(appId, deviceId)
+      } else {
+        const result = await resetIOSAppData(appId, deviceId)
+        dataCleared = result.dataCleared
+        deviceInfo = await getIOSDeviceMetadata(deviceId)
+      }
+
+      const response: ResetAppDataResponse = {
+        device: deviceInfo,
+        dataCleared
+      }
+
+      return wrapResponse(response)
     }
 
     if (name === "get_logs") {
-      const { platform, id, lines } = args as {
+      const { platform, appId, deviceId, lines } = args as {
         platform: "android" | "ios"
-        id: string
+        appId?: string
+        deviceId?: string
         lines?: number
       }
 
-      const logs =
-        platform === "android"
-          ? await getAndroidLogs(id, lines ?? 200)
-          : await getIOSLogs()
+      let logs: string[]
+      let deviceInfo: DeviceInfo
+
+      if (platform === "android") {
+        deviceInfo = await getAndroidDeviceMetadata(appId || "", deviceId)
+        const response = await getAndroidLogs(appId, lines ?? 200, deviceId)
+        logs = Array.isArray(response.logs) ? response.logs : []
+      } else {
+        deviceInfo = await getIOSDeviceMetadata(deviceId)
+        const response = await getIOSLogs(appId, deviceId)
+        logs = Array.isArray(response.logs) ? response.logs : []
+      }
+
+      // Filter crash lines (e.g. lines containing 'FATAL EXCEPTION') for internal or AI use
+      const crashLines = logs.filter(line => line.includes('FATAL EXCEPTION'))
+
+      // Return device metadata plus logs
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              device: deviceInfo,
+              result: {
+                lines: logs.length,
+                crashLines: crashLines.length > 0 ? crashLines : undefined
+              }
+            }, null, 2)
+          },
+          {
+            type: "text",
+            text: logs.join("\n")
+          }
+        ]
+      }
+    }
+
+    if (name === "capture_screenshot") {
+      const { platform, deviceId } = args as { platform: "android" | "ios"; deviceId?: string }
+
+      let screenshot: string
+      let resolution: { width: number; height: number }
+      let deviceInfo: DeviceInfo
+
+      if (platform === "android") {
+        deviceInfo = await getAndroidDeviceMetadata("", deviceId)
+        const result = await captureAndroidScreen(deviceId)
+        screenshot = result.screenshot
+        resolution = result.resolution
+      } else {
+        deviceInfo = await getIOSDeviceMetadata(deviceId)
+        const result = await captureIOSScreenshot(deviceId)
+        screenshot = result.screenshot
+        resolution = result.resolution
+      }
 
       return {
-        content: [{ type: "text", text: logs }]
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              device: deviceInfo,
+              result: {
+                resolution
+              }
+            }, null, 2)
+          },
+          {
+            type: "image",
+            data: screenshot,
+            mimeType: "image/png"
+          }
+        ]
       }
     }
   } catch (error) {
