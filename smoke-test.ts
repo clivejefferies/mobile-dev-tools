@@ -1,7 +1,14 @@
-import { startAndroidApp, terminateAndroidApp, captureAndroidScreen, getAndroidLogs } from "./src/android.js";
-import { startIOSApp, terminateIOSApp, captureIOSScreenshot, getIOSLogs } from "./src/ios.js";
+import { AndroidObserve } from "./src/android/observe.js";
+import { AndroidInteract } from "./src/android/interact.js";
+import { iOSObserve } from "./src/ios/observe.js";
+import { iOSInteract } from "./src/ios/interact.js";
 import fs from "fs/promises";
 import path from "path";
+
+const androidObserve = new AndroidObserve();
+const androidInteract = new AndroidInteract();
+const iosObserve = new iOSObserve();
+const iosInteract = new iOSInteract();
 
 async function main() {
   const args = process.argv.slice(2);
@@ -22,11 +29,11 @@ async function main() {
     let launchTimeMs: number;
 
     if (platform === "android") {
-      const result = await startAndroidApp(appId);
+      const result = await androidInteract.startApp(appId);
       startResult = result.appStarted;
       launchTimeMs = result.launchTimeMs;
     } else {
-      const result = await startIOSApp(appId);
+      const result = await iosInteract.startApp(appId);
       startResult = result.appStarted;
       launchTimeMs = result.launchTimeMs;
     }
@@ -47,11 +54,11 @@ async function main() {
     let resolution: { width: number; height: number };
 
     if (platform === "android") {
-      const result = await captureAndroidScreen();
+      const result = await androidObserve.captureScreen();
       screenshotBase64 = result.screenshot;
       resolution = result.resolution;
     } else {
-      const result = await captureIOSScreenshot();
+      const result = await iosObserve.captureScreenshot();
       screenshotBase64 = result.screenshot;
       resolution = result.resolution;
     }
@@ -70,11 +77,11 @@ async function main() {
     let logs: string[] = [];
 
     if (platform === "android") {
-       const result = await getAndroidLogs(appId, 50);
+       const result = await androidObserve.getLogs(appId, 50);
        logsCount = result.logCount;
        logs = result.logs;
     } else {
-       const result = await getIOSLogs();
+       const result = await iosObserve.getLogs(appId);
        logsCount = result.logCount;
        logs = result.logs;
     }
@@ -90,10 +97,10 @@ async function main() {
     let termResult: boolean;
     
     if (platform === "android") {
-      const result = await terminateAndroidApp(appId);
+      const result = await androidInteract.terminateApp(appId);
       termResult = result.appTerminated;
     } else {
-      const result = await terminateIOSApp(appId);
+      const result = await iosInteract.terminateApp(appId);
       termResult = result.appTerminated;
     }
 

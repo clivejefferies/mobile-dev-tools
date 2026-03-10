@@ -15,8 +15,15 @@ import {
   GetUITreeResponse
 } from "./types.js"
 
-import { startAndroidApp, getAndroidLogs, captureAndroidScreen, getAndroidDeviceMetadata, terminateAndroidApp, restartAndroidApp, resetAndroidAppData, getAndroidUITree } from "./android.js"
-import { startIOSApp, getIOSLogs, captureIOSScreenshot, getIOSDeviceMetadata, terminateIOSApp, restartIOSApp, resetIOSAppData } from "./ios.js"
+import { AndroidObserve } from "./android/observe.js"
+import { AndroidInteract } from "./android/interact.js"
+import { iOSObserve } from "./ios/observe.js"
+import { iOSInteract } from "./ios/interact.js"
+
+const androidObserve = new AndroidObserve()
+const androidInteract = new AndroidInteract()
+const iosObserve = new iOSObserve()
+const iosInteract = new iOSInteract()
 
 const server = new Server(
   {
@@ -175,18 +182,18 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     },
     {
       name: "get_ui_tree",
-      description: "Get the current UI hierarchy from an Android device. Returns a structured JSON representation of the screen content.",
+      description: "Get the current UI hierarchy from an Android device or iOS simulator. Returns a structured JSON representation of the screen content.",
       inputSchema: {
         type: "object",
         properties: {
           platform: {
             type: "string",
-            enum: ["android"],
-            description: "Currently only supports Android"
+            enum: ["android", "ios"],
+            description: "Platform to get UI tree for"
           },
           deviceId: {
             type: "string",
-            description: "Device Serial (Android). Defaults to connected device."
+            description: "Device Serial (Android) or UDID (iOS). Defaults to connected/booted device."
           }
         },
         required: ["platform"]
@@ -211,15 +218,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       let deviceInfo: DeviceInfo
 
       if (platform === "android") {
-        const result = await startAndroidApp(appId, deviceId)
+        const result = await androidInteract.startApp(appId, deviceId)
         appStarted = result.appStarted
         launchTimeMs = result.launchTimeMs
-        deviceInfo = await getAndroidDeviceMetadata(appId, deviceId)
+        deviceInfo = result.device
       } else {
-        const result = await startIOSApp(appId, deviceId)
+        const result = await iosInteract.startApp(appId, deviceId)
         appStarted = result.appStarted
         launchTimeMs = result.launchTimeMs
-        deviceInfo = await getIOSDeviceMetadata(deviceId)
+        deviceInfo = result.device
       }
 
       const response: StartAppResponse = {
@@ -242,13 +249,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       let deviceInfo: DeviceInfo
 
       if (platform === "android") {
-        const result = await terminateAndroidApp(appId, deviceId)
+        const result = await androidInteract.terminateApp(appId, deviceId)
         appTerminated = result.appTerminated
-        deviceInfo = await getAndroidDeviceMetadata(appId, deviceId)
+        deviceInfo = result.device
       } else {
-        const result = await terminateIOSApp(appId, deviceId)
+        const result = await iosInteract.terminateApp(appId, deviceId)
         appTerminated = result.appTerminated
-        deviceInfo = await getIOSDeviceMetadata(deviceId)
+        deviceInfo = result.device
       }
 
       const response: TerminateAppResponse = {
@@ -271,15 +278,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       let deviceInfo: DeviceInfo
 
       if (platform === "android") {
-        const result = await restartAndroidApp(appId, deviceId)
+        const result = await androidInteract.restartApp(appId, deviceId)
         appRestarted = result.appRestarted
         launchTimeMs = result.launchTimeMs
-        deviceInfo = await getAndroidDeviceMetadata(appId, deviceId)
+        deviceInfo = result.device
       } else {
-        const result = await restartIOSApp(appId, deviceId)
+        const result = await iosInteract.restartApp(appId, deviceId)
         appRestarted = result.appRestarted
         launchTimeMs = result.launchTimeMs
-        deviceInfo = await getIOSDeviceMetadata(deviceId)
+        deviceInfo = result.device
       }
 
       const response: RestartAppResponse = {
@@ -302,13 +309,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       let deviceInfo: DeviceInfo
 
       if (platform === "android") {
-        const result = await resetAndroidAppData(appId, deviceId)
+        const result = await androidInteract.resetAppData(appId, deviceId)
         dataCleared = result.dataCleared
-        deviceInfo = await getAndroidDeviceMetadata(appId, deviceId)
+        deviceInfo = result.device
       } else {
-        const result = await resetIOSAppData(appId, deviceId)
+        const result = await iosInteract.resetAppData(appId, deviceId)
         dataCleared = result.dataCleared
-        deviceInfo = await getIOSDeviceMetadata(deviceId)
+        deviceInfo = result.device
       }
 
       const response: ResetAppDataResponse = {
@@ -331,12 +338,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       let deviceInfo: DeviceInfo
 
       if (platform === "android") {
-        deviceInfo = await getAndroidDeviceMetadata(appId || "", deviceId)
-        const response = await getAndroidLogs(appId, lines ?? 200, deviceId)
+        deviceInfo = await androidObserve.getDeviceMetadata(appId || "", deviceId)
+        const response = await androidObserve.getLogs(appId, lines ?? 200, deviceId)
         logs = Array.isArray(response.logs) ? response.logs : []
       } else {
-        deviceInfo = await getIOSDeviceMetadata(deviceId)
-        const response = await getIOSLogs(appId, deviceId)
+        deviceInfo = await iosObserve.getDeviceMetadata(deviceId)
+        const response = await iosObserve.getLogs(appId, deviceId)
         logs = Array.isArray(response.logs) ? response.logs : []
       }
 
@@ -372,13 +379,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       let deviceInfo: DeviceInfo
 
       if (platform === "android") {
-        deviceInfo = await getAndroidDeviceMetadata("", deviceId)
-        const result = await captureAndroidScreen(deviceId)
+        deviceInfo = await androidObserve.getDeviceMetadata("", deviceId)
+        const result = await androidObserve.captureScreen(deviceId)
         screenshot = result.screenshot
         resolution = result.resolution
       } else {
-        deviceInfo = await getIOSDeviceMetadata(deviceId)
-        const result = await captureIOSScreenshot(deviceId)
+        deviceInfo = await iosObserve.getDeviceMetadata(deviceId)
+        const result = await iosObserve.captureScreenshot(deviceId)
         screenshot = result.screenshot
         resolution = result.resolution
       }
@@ -404,13 +411,17 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     if (name === "get_ui_tree") {
-      const { platform, deviceId } = args as { platform: "android", deviceId?: string }
+      const { platform, deviceId } = args as { platform: "android" | "ios", deviceId?: string }
       
-      if (platform !== "android") {
-        throw new Error("get_ui_tree is only supported for Android")
+      let result: GetUITreeResponse
+      if (platform === "android") {
+        result = await androidObserve.getUITree(deviceId)
+      } else if (platform === "ios") {
+        result = await iosObserve.getUITree(deviceId)
+      } else {
+        throw new Error(`Platform ${platform} not supported for get_ui_tree`)
       }
 
-      const result = await getAndroidUITree(deviceId)
       return wrapResponse(result)
     }
   } catch (error) {
