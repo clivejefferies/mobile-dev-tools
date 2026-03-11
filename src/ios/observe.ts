@@ -5,6 +5,8 @@ import { execCommand, getIOSDeviceMetadata, validateBundleId, IDB } from "./util
 
 // --- Helper Functions Specific to Observe ---
 
+const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
 interface IDBElement {
   AXFrame?: { x: number | string, y: number | string, width: number | string, height: number | string, w?: number | string, h?: number | string };
   frame?: { x: number | string, y: number | string, width: number | string, height: number | string, w?: number | string, h?: number | string };
@@ -27,44 +29,70 @@ function parseIDBFrame(frame: any): [number, number, number, number] {
   return [Math.round(x), Math.round(y), Math.round(x + w), Math.round(y + h)];
 }
 
-function traverseIDBNode(node: IDBElement, elements: UIElement[], parentIndex: number = -1): number {
+function getCenter(bounds: [number, number, number, number]): [number, number] {
+  const [x1, y1, x2, y2] = bounds;
+  return [Math.floor((x1 + x2) / 2), Math.floor((y1 + y2) / 2)];
+}
+
+function traverseIDBNode(node: IDBElement, elements: UIElement[], parentIndex: number = -1, depth: number = 0): number {
   if (!node) return -1;
+
+  let currentIndex = -1;
 
   // Prefer standard keys, fallback to alternatives
   const type = node.AXElementType || node.type || "unknown";
   const label = node.AXLabel || node.label || null;
   const value = node.AXValue || null;
   const frame = node.AXFrame || node.frame;
+  const traits = node.AXTraits || [];
   
-  const element: UIElement = {
-    text: label,
-    contentDescription: value, // iOS uses Value/Label differently than Android but this maps roughly
-    type: type,
-    resourceId: node.AXUniqueId || null,
-    clickable: (node.AXTraits || []).includes("UIAccessibilityTraitButton") || type === "Button",
-    enabled: true, // idb usually returns enabled elements
-    visible: true,
-    bounds: parseIDBFrame(frame),
-  };
+  const clickable = traits.includes("UIAccessibilityTraitButton") || type === "Button" || type === "Cell"; // Cells are often clickable
+  
+  // Filtering Logic:
+  // Keep if clickable OR has visible text/label OR has value
+  // Also keep 'Window' or 'Application' types as they define the root structure often, though usually depth 0
+  const isUseful = clickable || (label && label.length > 0) || (value && value.length > 0) || type === "Application" || type === "Window";
 
-  if (parentIndex !== -1) {
-    element.parentId = parentIndex;
+  if (isUseful) {
+    const bounds = parseIDBFrame(frame);
+    const element: UIElement = {
+      text: label,
+      contentDescription: value, 
+      type: type,
+      resourceId: node.AXUniqueId || null,
+      clickable: clickable,
+      enabled: true, // idb usually returns enabled elements
+      visible: true,
+      bounds: bounds,
+      center: getCenter(bounds),
+      depth: depth
+    };
+
+    if (parentIndex !== -1) {
+      element.parentId = parentIndex;
+    }
+
+    elements.push(element);
+    currentIndex = elements.length - 1;
   }
+  
+  // If current node was skipped, children inherit parentIndex and depth (flattening)
+  // If current node was added, children use currentIndex and depth + 1
+  const nextParentIndex = currentIndex !== -1 ? currentIndex : parentIndex;
+  const nextDepth = currentIndex !== -1 ? depth + 1 : depth;
 
-  elements.push(element);
-  const currentIndex = elements.length - 1;
   const childrenIndices: number[] = [];
 
   if (node.children && Array.isArray(node.children)) {
     for (const child of node.children) {
-      const childIndex = traverseIDBNode(child, elements, currentIndex);
+      const childIndex = traverseIDBNode(child, elements, nextParentIndex, nextDepth);
       if (childIndex !== -1) {
         childrenIndices.push(childIndex);
       }
     }
   }
 
-  if (childrenIndices.length > 0) {
+  if (currentIndex !== -1 && childrenIndices.length > 0) {
     elements[currentIndex].children = childrenIndices;
   }
 
@@ -74,6 +102,7 @@ function traverseIDBNode(node: IDBElement, elements: UIElement[], parentIndex: n
 // Check if IDB is installed
 async function isIDBInstalled(): Promise<boolean> {
   return new Promise((resolve) => {
+    // Check if 'idb' is in path by trying to run it
     const child = spawn(IDB, ['--version']);
     child.on('error', () => resolve(false));
     child.on('close', (code) => resolve(code === 0));
@@ -149,79 +178,92 @@ export class iOSObserve {
        };
     }
 
-    return new Promise((resolve) => {
-      // idb ui describe --udid <uuid> --json
-      // If deviceId is 'booted', try to resolve it to a UDID because idb often needs explicit target
-      const targetUdid = (device.id && device.id !== 'booted') ? device.id : undefined;
-      
-      const args = ['ui', 'describe', '--json'];
-      if (targetUdid) {
-          args.push('--udid', targetUdid);
+    // Resolve UDID if needed
+    const targetUdid = (device.id && device.id !== 'booted') ? device.id : undefined;
+
+    // Retry Logic
+    let jsonContent: any = null;
+    let attempts = 0;
+    const maxAttempts = 3;
+
+    while (attempts < maxAttempts) {
+      attempts++;
+      try {
+         // Stabilization delay
+         await delay(300 + (attempts * 100));
+
+         const args = ['ui', 'describe', '--json'];
+         if (targetUdid) {
+            args.push('--udid', targetUdid);
+         }
+
+         const output = await new Promise<string>((resolve, reject) => {
+             const child = spawn(IDB, args);
+             let stdout = '';
+             let stderr = '';
+
+             child.stdout.on('data', (data) => stdout += data.toString());
+             child.stderr.on('data', (data) => stderr += data.toString());
+
+             child.on('error', (err) => reject(new Error(`Failed to execute idb: ${err.message}`)));
+             
+             child.on('close', (code) => {
+                 if (code !== 0) {
+                     reject(new Error(`idb failed (code ${code}): ${stderr.trim()}`));
+                 } else {
+                     resolve(stdout);
+                 }
+             });
+         });
+
+         if (output && output.trim().length > 0) {
+             jsonContent = JSON.parse(output);
+             break; // Success
+         }
+      } catch (err) {
+         console.log(`Attempt ${attempts} failed: ${err}`);
       }
-
-      const child = spawn(IDB, args);
-      let stdout = '';
-      let stderr = '';
-
-      child.stdout.on('data', (data) => stdout += data.toString());
-      child.stderr.on('data', (data) => stderr += data.toString());
-
-      child.on('error', (err) => {
-           resolve({
+      
+      if (attempts === maxAttempts) {
+          return {
               device,
               screen: "",
               resolution: { width: 0, height: 0 },
               elements: [],
-              error: `Failed to execute idb: ${err.message}`
-           });
-      });
+              error: `Failed to retrieve valid UI dump after ${maxAttempts} attempts.`
+          };
+      }
+    }
 
-      child.on('close', (code) => {
-          if (code !== 0) {
-               resolve({
-                  device,
-                  screen: "",
-                  resolution: { width: 0, height: 0 },
-                  elements: [],
-                  error: `idb failed (code ${code}): ${stderr.trim()}`
-               });
-               return;
-          }
+    try {
+        const elements: UIElement[] = [];
+        const root = jsonContent;
+        
+        traverseIDBNode(root, elements);
 
-          try {
-              const json = JSON.parse(stdout);
-              const elements: UIElement[] = [];
-              
-              // idb return object usually has 'children' at root or is the root
-              const root = json; 
-              
-              traverseIDBNode(root, elements);
+        // Infer resolution from root element if possible (usually the Window/Application frame)
+        let width = 0;
+        let height = 0;
+        if (elements.length > 0) {
+            const rootBounds = elements[0].bounds;
+            width = rootBounds[2] - rootBounds[0];
+            height = rootBounds[3] - rootBounds[1];
+        }
 
-              // Infer resolution from root element if possible (usually the Window/Application frame)
-              let width = 0;
-              let height = 0;
-              if (elements.length > 0) {
-                  const rootBounds = elements[0].bounds;
-                  width = rootBounds[2] - rootBounds[0];
-                  height = rootBounds[3] - rootBounds[1];
-              }
-
-              resolve({
-                  device,
-                  screen: "",
-                  resolution: { width, height },
-                  elements
-              });
-          } catch (e) {
-               resolve({
-                  device,
-                  screen: "",
-                  resolution: { width: 0, height: 0 },
-                  elements: [],
-                  error: `Failed to parse idb output: ${e instanceof Error ? e.message : String(e)}`
-               });
-          }
-      });
-    });
+        return {
+            device,
+            screen: "",
+            resolution: { width, height },
+            elements
+        };
+    } catch (e) {
+         return {
+            device,
+            screen: "",
+            resolution: { width: 0, height: 0 },
+            elements: [],
+            error: `Failed to parse idb output: ${e instanceof Error ? e.message : String(e)}`
+         };
+    }
   }
 }

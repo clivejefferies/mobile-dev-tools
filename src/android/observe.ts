@@ -5,12 +5,19 @@ import { ADB, execAdb, getAndroidDeviceMetadata, getDeviceInfo } from "./utils.j
 
 // --- Helper Functions Specific to Observe ---
 
+const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
 function parseBounds(bounds: string): [number, number, number, number] {
   const match = bounds.match(/\[(\d+),(\d+)\]\[(\d+),(\d+)\]/);
   if (match) {
     return [parseInt(match[1]), parseInt(match[2]), parseInt(match[3]), parseInt(match[4])];
   }
   return [0, 0, 0, 0];
+}
+
+function getCenter(bounds: [number, number, number, number]): [number, number] {
+  const [x1, y1, x2, y2] = bounds;
+  return [Math.floor((x1 + x2) / 2), Math.floor((y1 + y2) / 2)];
 }
 
 async function getScreenResolution(deviceId?: string): Promise<{ width: number; height: number }> {
@@ -26,46 +33,61 @@ async function getScreenResolution(deviceId?: string): Promise<{ width: number; 
   return { width: 0, height: 0 };
 }
 
-function traverseNode(node: any, elements: UIElement[], parentIndex: number = -1): number {
+function traverseNode(node: any, elements: UIElement[], parentIndex: number = -1, depth: number = 0): number {
   if (!node) return -1;
 
   let currentIndex = -1;
 
   // Check if it's a valid node with attributes we care about
   if (node['@_class']) {
-    const element: UIElement = {
-      text: node['@_text'] || null,
-      contentDescription: node['@_content-desc'] || null,
-      type: node['@_class'] || 'unknown',
-      resourceId: node['@_resource-id'] || null,
-      clickable: node['@_clickable'] === 'true',
-      enabled: node['@_enabled'] === 'true',
-      visible: true, // uiautomator dump typically includes visible elements
-      bounds: parseBounds(node['@_bounds'] || '[0,0][0,0]')
-    };
+    const text = node['@_text'] || null;
+    const contentDescription = node['@_content-desc'] || null;
+    const clickable = node['@_clickable'] === 'true';
+    const bounds = parseBounds(node['@_bounds'] || '[0,0][0,0]');
     
-    if (parentIndex !== -1) {
-      element.parentId = parentIndex;
+    // Filtering Logic:
+    // Keep if clickable OR has visible text OR has content description
+    const isUseful = clickable || (text && text.length > 0) || (contentDescription && contentDescription.length > 0);
+
+    if (isUseful) {
+      const element: UIElement = {
+        text,
+        contentDescription,
+        type: node['@_class'] || 'unknown',
+        resourceId: node['@_resource-id'] || null,
+        clickable,
+        enabled: node['@_enabled'] === 'true',
+        visible: true, 
+        bounds,
+        center: getCenter(bounds),
+        depth
+      };
+      
+      if (parentIndex !== -1) {
+        element.parentId = parentIndex;
+      }
+      
+      elements.push(element);
+      currentIndex = elements.length - 1;
     }
-    
-    elements.push(element);
-    currentIndex = elements.length - 1;
   }
 
-  // If current node was skipped (no class), children inherit parentIndex
+  // If current node was skipped (not useful or no class), children inherit parentIndex
   // If current node was added, children use currentIndex
   const nextParentIndex = currentIndex !== -1 ? currentIndex : parentIndex;
+  const nextDepth = currentIndex !== -1 ? depth + 1 : depth; 
+  
   const childrenIndices: number[] = [];
 
   // Traverse children
   if (node.node) {
       if (Array.isArray(node.node)) {
           node.node.forEach((child: any) => {
-            const childIndex = traverseNode(child, elements, nextParentIndex);
+            const childIndex = traverseNode(child, elements, nextParentIndex, nextDepth);
             if (childIndex !== -1) childrenIndices.push(childIndex);
           });
       } else {
-          const childIndex = traverseNode(node.node, elements, nextParentIndex);
+          const childIndex = traverseNode(node.node, elements, nextParentIndex, nextDepth);
           if (childIndex !== -1) childrenIndices.push(childIndex);
       }
   }
@@ -94,20 +116,36 @@ export class AndroidObserve {
           throw new Error("Failed to get screen resolution. Is the device connected and authorized?");
       }
 
-      // Dump UI hierarchy
-      // We suppress stderr because uiautomator dump sometimes outputs "UI hierchary dumped to: /sdcard/ui.xml" to stdout/stderr
-      await execAdb(['shell', 'uiautomator', 'dump', '/sdcard/ui.xml'], deviceId);
-      
-      // Read the file
-      const xmlContent = await execAdb(['shell', 'cat', '/sdcard/ui.xml'], deviceId);
-      if (!xmlContent || xmlContent.trim().length === 0) {
-          throw new Error("Failed to read UI XML. File is empty.");
+      // Retry Logic
+      let xmlContent = '';
+      let attempts = 0;
+      const maxAttempts = 3;
+
+      while (attempts < maxAttempts) {
+        attempts++;
+        try {
+           // Stabilization delay
+           await delay(300 + (attempts * 100)); // 300ms, 400ms, 500ms...
+
+           // Dump UI hierarchy
+           await execAdb(['shell', 'uiautomator', 'dump', '/sdcard/ui.xml'], deviceId);
+           
+           // Read the file
+           xmlContent = await execAdb(['shell', 'cat', '/sdcard/ui.xml'], deviceId);
+           
+           // Check validity
+           if (xmlContent && xmlContent.trim().length > 0 && !xmlContent.includes("ERROR:")) {
+              break; // Success
+           }
+        } catch (err) {
+           console.log(`Attempt ${attempts} failed: ${err}`);
+        }
+        
+        if (attempts === maxAttempts) {
+           throw new Error(`Failed to retrieve valid UI dump after ${maxAttempts} attempts.`);
+        }
       }
-      
-      if (xmlContent.includes("ERROR:")) {
-           throw new Error(`UI Automator dump failed: ${xmlContent}`);
-      }
-      
+
       const parser = new XMLParser({
         ignoreAttributes: false,
         attributeNamePrefix: "@_"

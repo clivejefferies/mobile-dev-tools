@@ -68,6 +68,8 @@ export interface UIElement {
   resourceId: string | null;
   parentId?: number;
   children?: number[];
+  center?: [number, number];
+  depth?: number;
 }
 
 export interface GetUITreeResponse {

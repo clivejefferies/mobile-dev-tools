@@ -67,27 +67,7 @@ This option installs the package globally for easy use without cloning the repo.
 
 ---
 
-## Testing
-
-The repository includes a smoke test script to verify end-to-end functionality on real devices or simulators.
-
-```bash
-# Run smoke test for Android
-npx tsx smoke-test.ts android com.example.package
-
-# Run smoke test for iOS
-npx tsx smoke-test.ts ios com.example.bundleid
-```
-
-The smoke test performs the following sequence:
-1. Starts the app
-2. Captures a screenshot
-3. Fetches logs
-4. Terminates the app
-49. 
-50. ---
-51. 
-52. ## MCP Server Configuration
+## MCP Server Configuration
 
 Example WebUI MCP config using `npx --yes` and environment variables:
 
@@ -122,7 +102,7 @@ All tools accept a JSON input payload and return a structured JSON response. **E
 Launch a mobile app.
 
 **Input:**
-```json
+```jsonc
 {
   "platform": "android" | "ios",
   "appId": "com.example.app", // Android package or iOS bundle ID (Required)
@@ -143,7 +123,7 @@ Launch a mobile app.
 Fetch recent logs from the app or device.
 
 **Input:**
-```json
+```jsonc
 {
   "platform": "android" | "ios",
   "appId": "com.example.app", // Optional: filter logs by app
@@ -167,7 +147,7 @@ Returns two content blocks:
 Capture a screenshot of the current device screen.
 
 **Input:**
-```json
+```jsonc
 {
   "platform": "android" | "ios",
   "deviceId": "emulator-5554" // Optional: target specific device
@@ -189,7 +169,7 @@ Returns two content blocks:
 Terminate a running app.
 
 **Input:**
-```json
+```jsonc
 {
   "platform": "android" | "ios",
   "appId": "com.example.app", // Android package or iOS bundle ID (Required)
@@ -209,7 +189,7 @@ Terminate a running app.
 Restart an app (terminate then launch).
 
 **Input:**
-```json
+```jsonc
 {
   "platform": "android" | "ios",
   "appId": "com.example.app", // Android package or iOS bundle ID (Required)
@@ -230,7 +210,7 @@ Restart an app (terminate then launch).
 Clear app storage (reset to fresh install state).
 
 **Input:**
-```json
+```jsonc
 {
   "platform": "android" | "ios",
   "appId": "com.example.app", // Android package or iOS bundle ID (Required)
@@ -250,7 +230,7 @@ Clear app storage (reset to fresh install state).
 Get the current UI hierarchy from the device. Returns a structured JSON representation of the screen content.
 
 **Input:**
-```json
+```jsonc
 {
   "platform": "android" | "ios",
   "deviceId": "emulator-5554" // Optional
@@ -273,6 +253,8 @@ Get the current UI hierarchy from the device. Returns a structured JSON represen
       "enabled": true,
       "visible": true,
       "bounds": [120,400,280,450],
+      "center": [200, 425],
+      "depth": 1,
       "parentId": 0,
       "children": []
     }
@@ -298,6 +280,26 @@ Get the current UI hierarchy from the device. Returns a structured JSON represen
 - Ensure `adb` and `xcrun` are in your PATH or set `ADB_PATH` / `XCRUN_PATH` accordingly.
 - For iOS, the simulator must be booted before using tools.
 - The `capture_screenshot` tool returns a multi-block response: a JSON text block with metadata, followed by an image block containing the base64-encoded PNG data.
+
+---
+
+## Testing
+
+The repository includes a smoke test script to verify end-to-end functionality on real devices or simulators.
+
+```bash
+# Run smoke test for Android
+npx tsx smoke-test.ts android com.example.package
+
+# Run smoke test for iOS
+npx tsx smoke-test.ts ios com.example.bundleid
+```
+
+The smoke test performs the following sequence:
+1. Starts the app
+2. Captures a screenshot
+3. Fetches logs
+4. Terminates the app
 
 ---
 
