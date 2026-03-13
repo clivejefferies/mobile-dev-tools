@@ -268,6 +268,46 @@ Notes:
 - iOS: attempts `xcrun simctl install` for simulators and falls back to `idb install` if available for physical devices. Ensure `XCRUN_PATH` and `IDB` are configured if using non-standard locations.
 - Installation output and errors are surfaced in the response for debugging.
 
+### start_log_stream / read_log_stream / stop_log_stream
+Start a live log stream for an Android app and poll the accumulated entries.
+
+start_log_stream starts a background adb logcat process filtered by the app PID. It returns immediately with success and creates a per-session NDJSON file of parsed log entries.
+
+read_log_stream retrieves recent parsed entries and includes crash detection metadata.
+
+Input (start_log_stream):
+```jsonc
+{
+  "packageName": "com.example.app", // Required
+  "level": "error" | "warn" | "info" | "debug", // Optional, defaults to "error"
+  "sessionId": "optional-session-id" // Optional - used to track stream per debugging session
+}
+```
+
+Input (read_log_stream):
+```jsonc
+{
+  "sessionId": "optional-session-id",
+  "limit": 100, // Optional, max number of entries to return (default 100)
+  "since": "2026-03-13T14:00:00Z" // Optional, ISO timestamp or epoch ms to return only newer entries
+}
+```
+
+Response (read_log_stream):
+```json
+{
+  "entries": [
+    { "timestamp": "2026-03-13T14:01:04.123Z", "level": "E", "tag": "AndroidRuntime", "message": "FATAL EXCEPTION: main", "crash": true, "exception": "NullPointerException" }
+  ],
+  "crash_summary": { "crash_detected": true, "exception": "NullPointerException", "sample": "FATAL EXCEPTION: main" }
+}
+```
+
+Notes:
+- The read_log_stream `since` parameter accepts ISO timestamps or epoch milliseconds. Use it to poll incrementally (pass last seen timestamp).
+- Crash detection is heuristic-based (looks for 'FATAL EXCEPTION' and Exception names). It helps agents decide to capture traces or stop tests quickly.
+- stop_log_stream stops the background adb process for the session.
+
 
 ### get_ui_tree
 Get the current UI hierarchy from the device. Returns a structured JSON representation of the screen content.

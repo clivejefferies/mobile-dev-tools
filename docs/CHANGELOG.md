@@ -7,6 +7,7 @@ All notable changes to the **Mobile Debug MCP** project will be documented in th
 ### Added
 - **`list_devices` tool**: enumerate connected Android devices and iOS simulators. Returns device metadata (id, platform, osVersion, model, simulator, appInstalled).
 - **`install_app` tool**: install an APK (.apk) on Android or an app bundle (.app/.ipa) on iOS simulators/devices. Uses `adb install -r` for Android and `simctl`/`idb` for iOS.
+- **`start_log_stream`, `read_log_stream`, `stop_log_stream` tools**: stream Android logcat filtered by application PID, poll parsed entries, support incremental reads (limit/since) and basic crash detection metadata (crash_detected, exception, sample).
 
 ### Changed
 - Device-selection: server handlers now use a central resolver to pick a sensible default device when `deviceId` is omitted. This reduces duplication and makes behavior deterministic when multiple devices are attached.

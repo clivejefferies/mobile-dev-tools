@@ -27,6 +27,7 @@ import { AndroidInteract } from "./android/interact.js"
 import { iOSObserve } from "./ios/observe.js"
 import { iOSInteract } from "./ios/interact.js"
 import { resolveTargetDevice, listDevices } from "./resolve-device.js"
+import { startAndroidLogStream, readLogStreamLines, stopAndroidLogStream } from "./android/utils.js"
 
 const androidObserve = new AndroidObserve()
 const androidInteract = new AndroidInteract()
@@ -209,6 +210,38 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
           }
         },
         required: ["platform"]
+      }
+    },
+    {
+      name: "start_log_stream",
+      description: "Start streaming Android logcat filtered to the target application's PID. Use read_log_stream to fetch recent lines or stop_log_stream to stop.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          packageName: { type: "string" },
+          level: { type: "string", enum: ["error", "warn", "info", "debug"], default: "error" }
+        },
+        required: ["packageName"]
+      }
+    },
+    {
+      name: "read_log_stream",
+      description: "Read accumulated log stream entries for the active session.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          sessionId: { type: "string" }
+        }
+      }
+    },
+    {
+      name: "stop_log_stream",
+      description: "Stop an active log stream for the session.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          sessionId: { type: "string" }
+        }
       }
     },
 
@@ -769,6 +802,27 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const resolved = await resolveTargetDevice({ platform: 'android', deviceId })
       const result = await androidInteract.pressBack(resolved.id)
       return wrapResponse(result)
+    }
+
+    if (name === 'start_log_stream') {
+      const { packageName, level, sessionId: argSession } = args as { packageName: string; level?: 'error' | 'warn' | 'info' | 'debug'; sessionId?: string }
+      const sessionId = argSession || 'default'
+      const res = await startAndroidLogStream(packageName, level || 'error', undefined, sessionId)
+      return wrapResponse(res)
+    }
+
+    if (name === 'read_log_stream') {
+      const { sessionId: argSession, limit, since } = (args || {}) as { sessionId?: string, limit?: number, since?: string }
+      const sid = argSession || 'default'
+      const { entries, crash_summary } = await readLogStreamLines(sid, limit ?? 100, since)
+      return wrapResponse({ entries, crash_summary })
+    }
+
+    if (name === 'stop_log_stream') {
+      const { sessionId: argSession } = (args || {}) as { sessionId?: string }
+      const sid = argSession || 'default'
+      const res = await stopAndroidLogStream(sid)
+      return wrapResponse(res)
     }
   } catch (error) {
     return {

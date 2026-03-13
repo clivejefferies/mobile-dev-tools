@@ -148,3 +148,266 @@ export async function listAndroidDevices(appId?: string): Promise<DeviceInfo[]> 
     return []
   }
 }
+
+// Log stream management (one stream per session)
+import { createWriteStream, promises as fsPromises } from 'fs'
+import path from 'path'
+
+const activeLogStreams: Map<string, { proc: { kill: () => void } | ReturnType<typeof import('child_process').spawn>, file: string }> = new Map()
+
+// Test helper to register a pre-existing NDJSON file as the active stream for a session (used by unit tests)
+export function _setActiveLogStream(sessionId: string, file: string) {
+  activeLogStreams.set(sessionId, { proc: { kill: () => {} }, file })
+}
+
+export function _clearActiveLogStream(sessionId: string) {
+  activeLogStreams.delete(sessionId)
+}
+
+// Robust log line parser supporting multiple logcat formats
+export function parseLogLine(line: string) {
+  // Collapse internal newlines so multiline stack traces are parseable as a single entry
+  const rawLine = line
+  const normalizedLine = rawLine.replace(/\r?\n/g, ' ')
+  const entry: any = { timestamp: '', level: '', tag: '', message: rawLine, _iso: null, crash: false }
+
+  const nowYear = new Date().getFullYear()
+
+  const tryIso = (ts: string) => {
+    if (!ts) return null
+    // If it's already ISO
+    if (/^\d{4}-\d{2}-\d{2}T/.test(ts)) return ts
+    // If format MM-DD HH:MM:SS(.sss)
+    const m = ts.match(/^(\d{2})-(\d{2})\s+(\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?)$/)
+    if (m) {
+      const month = m[1]
+      const day = m[2]
+      const time = m[3]
+      const candidate = `${nowYear}-${month}-${day}T${time}`
+      const d = new Date(candidate)
+      if (!isNaN(d.getTime())) return d.toISOString()
+    }
+    // If format YYYY-MM-DD HH:MM:SS(.sss)
+    const m2 = ts.match(/^(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?)$/)
+    if (m2) {
+      const candidate = `${m2[1]}T${m2[2]}`
+      const d = new Date(candidate)
+      if (!isNaN(d.getTime())) return d.toISOString()
+    }
+    return null
+  }
+
+  // Patterns to try (ordered)
+  const patterns: Array<{re: RegExp, groups: string[]}> = [
+    // MM-DD HH:MM:SS.mmm PID TID LEVEL/Tag: msg
+    { re: /^(\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?)\s+(\d+)\s+(\d+)\s+([VDIWE])\/([^:]+):\s*(.*)$/, groups: ['ts','pid','tid','level','tag','msg'] },
+    // MM-DD HH:MM:SS.mmm PID TID LEVEL Tag: msg  (space between level and tag)
+    { re: /^(\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?)\s+(\d+)\s+(\d+)\s+([VDIWE])\s+([^:]+):\s*(.*)$/, groups: ['ts','pid','tid','level','tag','msg'] },
+    // YYYY-MM-DD full date with PID TID LEVEL/Tag
+    { re: /^(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?)\s+(\d+)\s+(\d+)\s+([VDIWE])\/([^:]+):\s*(.*)$/, groups: ['ts','pid','tid','level','tag','msg'] },
+    // YYYY-MM-DD with space separation
+    { re: /^(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?)\s+(\d+)\s+(\d+)\s+([VDIWE])\s+([^:]+):\s*(.*)$/, groups: ['ts','pid','tid','level','tag','msg'] },
+    // MM-DD PID LEVEL/Tag: msg
+    { re: /^(\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?)\s+(\d+)\s+([VDIWE])\/([^:]+):\s*(.*)$/, groups: ['ts','pid','level','tag','msg'] },
+    // MM-DD PID LEVEL Tag: msg (space)
+    { re: /^(\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?)\s+(\d+)\s+([VDIWE])\s+([^:]+):\s*(.*)$/, groups: ['ts','pid','level','tag','msg'] },
+    // Short form LEVEL/Tag: msg
+    { re: /^([VDIWE])\/([^\(\:]+)(?:\([0-9]+\))?:\s*(.*)$/, groups: ['level','tag','msg'] },
+    // Short form LEVEL Tag: msg
+    { re: /^([VDIWE])\s+([^\(\:]+)(?:\([0-9]+\))?:\s*(.*)$/, groups: ['level','tag','msg'] },
+  ]
+
+  for (const p of patterns) {
+    const m = normalizedLine.match(p.re)
+    if (m) {
+      const g = p.groups
+      const vals: any = {}
+      for (let i=0;i<g.length;i++) vals[g[i]] = m[i+1]
+      const ts = vals.ts
+      if (ts) {
+        const iso = tryIso(ts)
+        if (iso) {
+          entry.timestamp = ts
+          entry._iso = iso
+        } else {
+          entry.timestamp = ts
+        }
+      }
+      if (vals.level) entry.level = vals.level
+      if (vals.tag) entry.tag = vals.tag.trim()
+      entry.message = vals.msg || entry.message
+      // Crash heuristics
+      const msg = (entry.message || '').toString()
+      const crash = /FATAL EXCEPTION/i.test(msg) || /\b([A-Za-z0-9_$.]+Exception)\b/.test(msg)
+      if (crash) {
+        entry.crash = true
+        const exMatch = msg.match(/\b([A-Za-z0-9_$.]+Exception)\b/)
+        if (exMatch) entry.exception = exMatch[1]
+      }
+      return entry
+    }
+  }
+
+  // No pattern matched: attempt to extract level/tag like '... E/Tag: msg'
+  const alt = normalizedLine.match(/([VDIWE])\/([^:]+):\s*(.*)$/)
+  if (alt) {
+    entry.level = alt[1]
+    entry.tag = alt[2].trim()
+    entry.message = alt[3]
+    const msg = entry.message
+    const crash = /FATAL EXCEPTION/i.test(msg) || /\b([A-Za-z0-9_$.]+Exception)\b/.test(msg)
+    if (crash) {
+      entry.crash = true
+      const exMatch = msg.match(/\b([A-Za-z0-9_$.]+Exception)\b/)
+      if (exMatch) entry.exception = exMatch[1]
+    }
+  }
+
+  return entry
+}
+
+export async function startAndroidLogStream(packageName: string, level: 'error' | 'warn' | 'info' | 'debug' = 'error', deviceId?: string, sessionId: string = 'default'): Promise<{ success: boolean; stream_started?: boolean; error?: string }> {
+  try {
+    // Determine PID
+    const pidOutput = await execAdb(['shell', 'pidof', packageName], deviceId).catch(() => '')
+    const pid = (pidOutput || '').trim()
+    if (!pid) {
+      return { success: false, error: 'app_not_running' }
+    }
+
+    // Map level to logcat filter
+    const levelMap: Record<string, string> = { error: '*:E', warn: '*:W', info: '*:I', debug: '*:D' }
+    const filter = levelMap[level] || levelMap['error']
+
+    // Prevent multiple streams per session
+    if (activeLogStreams.has(sessionId)) {
+      // stop existing
+      try { activeLogStreams.get(sessionId)!.proc.kill() } catch(e) {}
+      activeLogStreams.delete(sessionId)
+    }
+
+    // Start logcat process
+    const args = ['logcat', `--pid=${pid}`, filter]
+    const proc = spawn(ADB, args)
+
+    // Prepare output file
+    const tmpDir = process.env.TMPDIR || '/tmp'
+    const file = path.join(tmpDir, `mobile-debug-log-${sessionId}.ndjson`)
+    const stream = createWriteStream(file, { flags: 'a' })
+
+    proc.stdout.on('data', (chunk) => {
+      const text = chunk.toString()
+      const lines = text.split(/\r?\n/).filter(Boolean)
+      for (const l of lines) {
+        const entry = parseLogLine(l)
+        stream.write(JSON.stringify(entry) + '\n')
+      }
+    })
+
+    proc.stderr.on('data', (chunk) => {
+      // write stderr lines as message with level 'E'
+      const text = chunk.toString()
+      const lines = text.split(/\r?\n/).filter(Boolean)
+      for (const l of lines) {
+        const entry = { timestamp: '', level: 'E', tag: 'adb', message: l }
+        stream.write(JSON.stringify(entry) + '\n')
+      }
+    })
+
+    proc.on('close', (code) => {
+      stream.end()
+      activeLogStreams.delete(sessionId)
+    })
+
+    activeLogStreams.set(sessionId, { proc, file })
+
+    return { success: true, stream_started: true }
+  } catch (err) {
+    return { success: false, error: 'log_stream_start_failed' }
+  }
+}
+
+export async function stopAndroidLogStream(sessionId: string = 'default'): Promise<{ success: boolean }> {
+  const entry = activeLogStreams.get(sessionId)
+  if (!entry) return { success: true }
+  try {
+    entry.proc.kill()
+  } catch (e) {}
+  activeLogStreams.delete(sessionId)
+  return { success: true }
+}
+
+export async function readLogStreamLines(sessionId: string = 'default', limit: number = 100, since?: string): Promise<{ entries: any[], crash_summary?: { crash_detected: boolean, exception?: string, sample?: string } }> {
+  const entry = activeLogStreams.get(sessionId)
+  if (!entry) return { entries: [] }
+  try {
+    const data = await fsPromises.readFile(entry.file, 'utf8').catch(() => '')
+    if (!data) return { entries: [], crash_summary: { crash_detected: false } }
+    const lines = data.split(/\r?\n/).filter(Boolean)
+
+    // Parse NDJSON lines into objects, normalise timestamps and detect crashes
+    const parsed = lines.map(l => {
+      try {
+        const obj = JSON.parse(l)
+        // Normalise timestamp: try to parse formats like "MM-DD HH:MM:SS.mmm" or ISO
+        let ts = obj.timestamp || ''
+        let iso: string | null = null
+        if (ts) {
+          // If ISO-like
+          if (/^\d{4}-\d{2}-\d{2}T/.test(ts)) {
+            iso = ts
+          } else {
+            // Try to parse "MM-DD HH:MM:SS.mmm" by prepending current year
+            const year = new Date().getFullYear()
+            const m = ts.match(/^(\d{2}-\d{2} \d{2}:\d{2}:\d{2}(?:\.\d{1,3})?)$/)
+            if (m) {
+              const candidate = `${year}-${m[1].replace(/ /,'T')}`
+              const d = new Date(candidate)
+              if (!isNaN(d.getTime())) iso = d.toISOString()
+            }
+          }
+        }
+        obj._iso = iso || null
+        // Detect crash keywords and exception names
+        const msg = (obj.message || '').toString()
+        const crash = /FATAL EXCEPTION/i.test(msg) || /\b(\w+Exception)\b/.test(msg)
+        const exMatch = msg.match(/\b([A-Za-z0-9_.]+Exception)\b/)
+        if (crash) {
+          obj.crash = true
+          if (exMatch) obj.exception = exMatch[1]
+        } else {
+          obj.crash = false
+        }
+        return obj
+      } catch {
+        return { message: l, _iso: null, crash: false }
+      }
+    })
+
+    // Filter by since if provided (accept ISO or epoch ms)
+    let filtered = parsed
+    if (since) {
+      let sinceMs: number | null = null
+      // If numeric string
+      if (/^\d+$/.test(since)) sinceMs = Number(since)
+      else {
+        const sDate = new Date(since)
+        if (!isNaN(sDate.getTime())) sinceMs = sDate.getTime()
+      }
+      if (sinceMs !== null) {
+        filtered = parsed.filter(p => p._iso && (new Date(p._iso).getTime() >= sinceMs))
+      }
+    }
+
+    // Return the last `limit` entries (most recent)
+    const entries = filtered.slice(-Math.max(0, limit))
+
+    // Crash summary
+    const crashEntry = entries.find(e => e.crash)
+    const crash_summary = crashEntry ? { crash_detected: true, exception: crashEntry.exception, sample: crashEntry.message } : { crash_detected: false }
+
+    return { entries, crash_summary }
+  } catch (e) {
+    return { entries: [], crash_summary: { crash_detected: false } }
+  }
+}
