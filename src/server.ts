@@ -28,6 +28,7 @@ import { iOSObserve } from "./ios/observe.js"
 import { iOSInteract } from "./ios/interact.js"
 import { resolveTargetDevice, listDevices } from "./resolve-device.js"
 import { startAndroidLogStream, readLogStreamLines, stopAndroidLogStream } from "./android/utils.js"
+import { startIOSLogStream, readIOSLogStreamLines, stopIOSLogStream } from "./ios/utils.js"
 
 const androidObserve = new AndroidObserve()
 const androidInteract = new AndroidInteract()
@@ -214,12 +215,15 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     },
     {
       name: "start_log_stream",
-      description: "Start streaming Android logcat filtered to the target application's PID. Use read_log_stream to fetch recent lines or stop_log_stream to stop.",
+      description: "Start streaming logs for a target application on Android or iOS. For Android this uses adb logcat --pid=<pid>; for iOS it streams `xcrun simctl spawn <device> log stream` with a predicate.",
       inputSchema: {
         type: "object",
         properties: {
-          packageName: { type: "string" },
-          level: { type: "string", enum: ["error", "warn", "info", "debug"], default: "error" }
+          platform: { type: "string", enum: ["android", "ios"], default: "android" },
+          packageName: { type: "string", description: "Android package name or iOS bundle id" },
+          level: { type: "string", enum: ["error", "warn", "info", "debug"], default: "error" },
+          deviceId: { type: "string", description: "Device Serial (Android) or UDID (iOS). Defaults to connected/booted device." },
+          sessionId: { type: "string", description: "Session identifier for the log stream" }
         },
         required: ["packageName"]
       }
@@ -805,24 +809,44 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     if (name === 'start_log_stream') {
-      const { packageName, level, sessionId: argSession } = args as { packageName: string; level?: 'error' | 'warn' | 'info' | 'debug'; sessionId?: string }
+      const { platform, packageName, level, sessionId: argSession, deviceId } = args as { platform?: 'android' | 'ios'; packageName: string; level?: 'error' | 'warn' | 'info' | 'debug'; sessionId?: string; deviceId?: string }
       const sessionId = argSession || 'default'
-      const res = await startAndroidLogStream(packageName, level || 'error', undefined, sessionId)
-      return wrapResponse(res)
+      const effectivePlatform = platform || 'android'
+      if (effectivePlatform === 'android') {
+        const resolved = await resolveTargetDevice({ platform: 'android', appId: packageName, deviceId })
+        const res = await startAndroidLogStream(packageName, level || 'error', resolved.id, sessionId)
+        return wrapResponse(res)
+      } else {
+        const resolved = await resolveTargetDevice({ platform: 'ios', appId: packageName, deviceId })
+        const res = await startIOSLogStream(packageName, level || 'error', resolved.id, sessionId)
+        return wrapResponse(res)
+      }
     }
 
     if (name === 'read_log_stream') {
-      const { sessionId: argSession, limit, since } = (args || {}) as { sessionId?: string, limit?: number, since?: string }
+      const { platform, sessionId: argSession, limit, since } = (args || {}) as { platform?: 'android' | 'ios'; sessionId?: string, limit?: number, since?: string }
       const sid = argSession || 'default'
-      const { entries, crash_summary } = await readLogStreamLines(sid, limit ?? 100, since)
-      return wrapResponse({ entries, crash_summary })
+      const effectivePlatform = platform || 'android'
+      if (effectivePlatform === 'android') {
+        const { entries, crash_summary } = await readLogStreamLines(sid, limit ?? 100, since)
+        return wrapResponse({ entries, crash_summary })
+      } else {
+        const { entries, crash_summary } = await readIOSLogStreamLines(sid, limit ?? 100, since)
+        return wrapResponse({ entries, crash_summary })
+      }
     }
 
     if (name === 'stop_log_stream') {
-      const { sessionId: argSession } = (args || {}) as { sessionId?: string }
+      const { platform, sessionId: argSession } = (args || {}) as { platform?: 'android' | 'ios'; sessionId?: string }
       const sid = argSession || 'default'
-      const res = await stopAndroidLogStream(sid)
-      return wrapResponse(res)
+      const effectivePlatform = platform || 'android'
+      if (effectivePlatform === 'android') {
+        const res = await stopAndroidLogStream(sid)
+        return wrapResponse(res)
+      } else {
+        const res = await stopIOSLogStream(sid)
+        return wrapResponse(res)
+      }
     }
   } catch (error) {
     return {

@@ -345,38 +345,29 @@ export async function readLogStreamLines(sessionId: string = 'default', limit: n
     if (!data) return { entries: [], crash_summary: { crash_detected: false } }
     const lines = data.split(/\r?\n/).filter(Boolean)
 
-    // Parse NDJSON lines into objects, normalise timestamps and detect crashes
+    // Parse NDJSON lines into objects. Prefer fields written by parseLogLine. For backward compatibility, if _iso or crash are missing, enrich minimally here (avoid duplicating full parse logic).
     const parsed = lines.map(l => {
       try {
-        const obj = JSON.parse(l)
-        // Normalise timestamp: try to parse formats like "MM-DD HH:MM:SS.mmm" or ISO
-        let ts = obj.timestamp || ''
-        let iso: string | null = null
-        if (ts) {
-          // If ISO-like
-          if (/^\d{4}-\d{2}-\d{2}T/.test(ts)) {
-            iso = ts
-          } else {
-            // Try to parse "MM-DD HH:MM:SS.mmm" by prepending current year
-            const year = new Date().getFullYear()
-            const m = ts.match(/^(\d{2}-\d{2} \d{2}:\d{2}:\d{2}(?:\.\d{1,3})?)$/)
-            if (m) {
-              const candidate = `${year}-${m[1].replace(/ /,'T')}`
-              const d = new Date(candidate)
-              if (!isNaN(d.getTime())) iso = d.toISOString()
-            }
+        const obj: any = JSON.parse(l)
+        // Ensure _iso: if missing, try to derive using Date()
+        if (typeof obj._iso === 'undefined') {
+          let iso: string | null = null
+          if (obj.timestamp) {
+            const d = new Date(obj.timestamp)
+            if (!isNaN(d.getTime())) iso = d.toISOString()
           }
+          obj._iso = iso
         }
-        obj._iso = iso || null
-        // Detect crash keywords and exception names
-        const msg = (obj.message || '').toString()
-        const crash = /FATAL EXCEPTION/i.test(msg) || /\b(\w+Exception)\b/.test(msg)
-        const exMatch = msg.match(/\b([A-Za-z0-9_.]+Exception)\b/)
-        if (crash) {
-          obj.crash = true
-          if (exMatch) obj.exception = exMatch[1]
-        } else {
-          obj.crash = false
+        // Ensure crash flag: if missing, run minimal heuristic
+        if (typeof obj.crash === 'undefined') {
+          const msg = (obj.message || '').toString()
+          const exMatch = msg.match(/\b([A-Za-z0-9_$.]+Exception)\b/)
+          if (/FATAL EXCEPTION/i.test(msg) || exMatch) {
+            obj.crash = true
+            if (exMatch) obj.exception = exMatch[1]
+          } else {
+            obj.crash = false
+          }
         }
         return obj
       } catch {
