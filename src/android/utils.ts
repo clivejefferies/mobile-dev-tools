@@ -1,7 +1,75 @@
-import { spawn } from "child_process"
+import { spawn, execSync } from 'child_process'
 import { DeviceInfo } from "../types.js"
+import { existsSync, createWriteStream, promises as fsPromises } from 'fs'
+import path from 'path'
 
-export const ADB = process.env.ADB_PATH || "adb"
+export const ADB = process.env.ADB_PATH || 'adb'
+
+export async function detectJavaHome(): Promise<string | undefined> {
+  try {
+    // If JAVA_HOME is set, validate it's Java 17
+    if (process.env.JAVA_HOME) {
+      try {
+        const javaBin = path.join(process.env.JAVA_HOME, 'bin', 'java')
+        const v = execSync(`"${javaBin}" -version`, { stdio: ['ignore', 'pipe', 'pipe'] }).toString()
+        if (/\b17\b/.test(v) || /17\./.test(v)) return process.env.JAVA_HOME
+        console.debug('[android] Existing JAVA_HOME does not appear to be Java 17, will search for JDK17')
+      } catch (e) {
+        console.debug('[android] Failed to validate existing JAVA_HOME, searching for JDK17')
+      }
+    }
+
+    // macOS explicit path
+    const explicit = '/Library/Java/JavaVirtualMachines/jdk-17.jdk/Contents/Home'
+    if (existsSync(explicit)) return explicit
+
+    // Android Studio JBR candidates
+    const jbrCandidates = [
+      '/Applications/Android Studio.app/Contents/jbr',
+      '/Applications/Android Studio Preview.app/Contents/jbr',
+      '/Applications/Android Studio Preview 2022.3.app/Contents/jbr',
+      '/Applications/Android Studio Preview 2023.1.app/Contents/jbr'
+    ]
+    for (const p of jbrCandidates) {
+      const javaBin = path.join(p, 'bin', 'java')
+      if (existsSync(javaBin)) {
+        try {
+          const v = execSync(`"${javaBin}" -version`, { stdio: ['ignore', 'pipe', 'pipe'] }).toString()
+          if (/\b17\b/.test(v) || /17\./.test(v)) return p
+        } catch {}
+      }
+    }
+
+    // macOS /usr/libexec/java_home
+    try {
+      const out = execSync('/usr/libexec/java_home -v 17', { stdio: ['ignore', 'pipe', 'pipe'] }).toString().trim()
+      if (out) return out
+    } catch {}
+
+    // macOS common JDK locations
+    try {
+      const homes = execSync('ls -1 /Library/Java/JavaVirtualMachines || true', { stdio: ['ignore', 'pipe', 'inherit'] }).toString().split(/\r?\n/).filter(Boolean)
+      for (const h of homes) {
+        if (h.toLowerCase().includes('17') || h.toLowerCase().includes('jdk-17')) {
+          const candidate = `/Library/Java/JavaVirtualMachines/${h}/Contents/Home`
+          return candidate
+        }
+      }
+    } catch {}
+
+    // Linux locations
+    const linuxCandidates = [
+      '/usr/lib/jvm/java-17-openjdk-amd64',
+      '/usr/lib/jvm/java-17-openjdk',
+      '/usr/lib/jvm/zulu17',
+      '/usr/lib/jvm/temurin-17-jdk'
+    ]
+    for (const p of linuxCandidates) {
+      try { if (existsSync(p)) return p } catch {}
+    }
+  } catch (e) {}
+  return undefined
+}
 
 // Helper to construct ADB args with optional device ID
 function getAdbArgs(args: string[], deviceId?: string): string[] {
@@ -35,12 +103,21 @@ export function execAdb(args: string[], deviceId?: string, options: any = {}): P
       })
     }
 
-    let timeoutMs = customTimeout || 2000;
-    if (!customTimeout) {
-      if (args.includes('logcat')) {
+    let timeoutMs: number;
+    if (typeof customTimeout === 'number' && !isNaN(customTimeout)) {
+      timeoutMs = customTimeout;
+    } else {
+      const envTimeout = parseInt(process.env.MCP_ADB_TIMEOUT || process.env.ADB_TIMEOUT || '', 10);
+      if (!isNaN(envTimeout) && envTimeout > 0) {
+        timeoutMs = envTimeout;
+      } else {
+        if (args.includes('logcat')) {
           timeoutMs = 10000;
-      } else if (args.includes('uiautomator') && args.includes('dump')) {
+        } else if (args.includes('uiautomator') && args.includes('dump')) {
           timeoutMs = 20000; // UI dump can be slow
+        } else {
+          timeoutMs = 120000; // default 2 minutes for installs and slow commands
+        }
       }
     }
 
@@ -150,8 +227,6 @@ export async function listAndroidDevices(appId?: string): Promise<DeviceInfo[]> 
 }
 
 // Log stream management (one stream per session)
-import { createWriteStream, promises as fsPromises } from 'fs'
-import path from 'path'
 
 const activeLogStreams: Map<string, { proc: { kill: () => void } | ReturnType<typeof import('child_process').spawn>, file: string }> = new Map()
 

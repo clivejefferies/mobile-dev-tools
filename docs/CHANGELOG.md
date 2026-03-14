@@ -2,6 +2,15 @@
 
 All notable changes to the **Mobile Debug MCP** project will be documented in this file.
 
+## [0.9.0] - 2026-03-14
+
+### Added / Changed
+- install_app now builds apps when given a project directory and then installs the produced artifact (Android: Gradle wrapper assembleDebug; iOS: xcodebuild where applicable).
+- Auto-detects and prefers JDK 17 (Android Studio JBR or system JDK). Any JAVA_HOME overrides are scoped to the spawned build process, avoiding global system changes.
+- Respects ADB_PATH and falls back to PATH if unset. Set ADB_PATH to an explicit adb binary to avoid PATH discovery issues.
+- Increased default adb timeout to 120s for installs; timeout can be configured via MCP_ADB_TIMEOUT or ADB_TIMEOUT environment variables.
+- Improved logging and error messages for build/install steps. Unit and integration tests updated and converted to TypeScript.
+
 ## [0.8.0]
 
 ### Added

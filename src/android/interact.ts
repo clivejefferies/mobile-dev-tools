@@ -1,10 +1,11 @@
 import { StartAppResponse, TerminateAppResponse, RestartAppResponse, ResetAppDataResponse, WaitForElementResponse, TapResponse, SwipeResponse, TypeTextResponse, PressBackResponse } from "../types.js"
-import { execAdb, getAndroidDeviceMetadata, getDeviceInfo } from "./utils.js"
+import { execAdb, getAndroidDeviceMetadata, getDeviceInfo, detectJavaHome } from "./utils.js"
 import { AndroidObserve } from "./observe.js"
 import { promises as fs } from "fs"
-import { spawn } from "child_process"
+import { spawn, execSync } from "child_process"
 import path from "path"
 import { existsSync } from "fs"
+
 
 export class AndroidInteract {
   private observe = new AndroidObserve();
@@ -119,8 +120,50 @@ export class AndroidInteract {
         const gradlewPath = path.join(apkPath, 'gradlew')
         const gradleCmd = existsSync(gradlewPath) ? './gradlew' : 'gradle'
 
-        await new Promise<void>((resolve, reject) => {
-          const proc = spawn(gradleCmd, ['assembleDebug'], { cwd: apkPath, shell: true })
+        await new Promise<void>(async (resolve, reject) => {
+          // Auto-detect and set JAVA_HOME (prefer JDK 17) so builds don't require manual environment setup
+          const detectedJavaHome = await detectJavaHome().catch(() => undefined)
+          const env = Object.assign({}, process.env)
+          if (detectedJavaHome) {
+            // Override existing JAVA_HOME if detection found a preferably compatible JDK (e.g., JDK 17).
+            if (env.JAVA_HOME !== detectedJavaHome) {
+              env.JAVA_HOME = detectedJavaHome
+              // Also ensure the JDK bin is on PATH so tools like jlink/javac are resolved from the detected JDK
+              env.PATH = `${path.join(detectedJavaHome, 'bin')}${path.delimiter}${env.PATH || ''}`
+              console.debug('[android] Overriding JAVA_HOME with detected path:', detectedJavaHome)
+            }
+          }
+
+          // Sanitize environment so user shell init scripts are less likely to override our JAVA_HOME.
+          try {
+            // Remove obvious shell profile hints; avoid touching SDKMAN symlinks or on-disk state.
+            delete env.SHELL
+          } catch (e) {}
+
+          // If we detected a compatible JDK, instruct Gradle to use it and avoid daemon reuse
+          // Prepare gradle invocation
+          const gradleArgs = ['assembleDebug']
+          if (detectedJavaHome) {
+            gradleArgs.push(`-Dorg.gradle.java.home=${detectedJavaHome}`)
+            gradleArgs.push('--no-daemon')
+            env.GRADLE_JAVA_HOME = detectedJavaHome
+          }
+
+          // Prefer invoking the wrapper directly without a shell to avoid user profile shims (sdkman) re-setting JAVA_HOME
+          const wrapperPath = path.join(apkPath, 'gradlew')
+          const useWrapper = existsSync(wrapperPath)
+          const execCmd = useWrapper ? wrapperPath : gradleCmd
+          const spawnOpts: any = { cwd: apkPath, env }
+          // When using wrapper, ensure it's executable and invoke directly (no shell)
+          if (useWrapper) {
+            try { await fs.chmod(wrapperPath, 0o755).catch(()=>{}) } catch {}
+            spawnOpts.shell = false
+          } else {
+            // if using system 'gradle' allow shell to resolve platform PATH
+            spawnOpts.shell = true
+          }
+
+          const proc = spawn(execCmd, gradleArgs, spawnOpts)
           let stderr = ''
           proc.stderr?.on('data', d => stderr += d.toString())
           proc.on('close', code => {
