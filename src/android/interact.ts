@@ -1,6 +1,10 @@
 import { StartAppResponse, TerminateAppResponse, RestartAppResponse, ResetAppDataResponse, WaitForElementResponse, TapResponse, SwipeResponse, TypeTextResponse, PressBackResponse } from "../types.js"
 import { execAdb, getAndroidDeviceMetadata, getDeviceInfo } from "./utils.js"
 import { AndroidObserve } from "./observe.js"
+import { promises as fs } from "fs"
+import { spawn } from "child_process"
+import path from "path"
+import { existsSync } from "fs"
 
 export class AndroidInteract {
   private observe = new AndroidObserve();
@@ -91,8 +95,47 @@ export class AndroidInteract {
     const metadata = await getAndroidDeviceMetadata("", deviceId)
     const deviceInfo = getDeviceInfo(deviceId || 'default', metadata)
 
+    // Helper to recursively find first APK under a directory
+    async function findApk(dir: string): Promise<string | undefined> {
+      const entries = await fs.readdir(dir, { withFileTypes: true }).catch(() => [])
+      for (const e of entries) {
+        const full = path.join(dir, e.name)
+        if (e.isDirectory()) {
+          const found = await findApk(full)
+          if (found) return found
+        } else if (e.isFile() && full.endsWith('.apk')) {
+          return full
+        }
+      }
+      return undefined
+    }
+
     try {
-      const output = await execAdb(['install', '-r', apkPath], deviceId)
+      let apkToInstall = apkPath
+
+      // If a directory is provided, attempt to build via Gradle
+      const stat = await fs.stat(apkPath).catch(() => null)
+      if (stat && stat.isDirectory()) {
+        const gradlewPath = path.join(apkPath, 'gradlew')
+        const gradleCmd = existsSync(gradlewPath) ? './gradlew' : 'gradle'
+
+        await new Promise<void>((resolve, reject) => {
+          const proc = spawn(gradleCmd, ['assembleDebug'], { cwd: apkPath, shell: true })
+          let stderr = ''
+          proc.stderr?.on('data', d => stderr += d.toString())
+          proc.on('close', code => {
+            if (code === 0) resolve()
+            else reject(new Error(stderr || `Gradle build failed with code ${code}`))
+          })
+          proc.on('error', err => reject(err))
+        })
+
+        const built = await findApk(apkPath)
+        if (!built) throw new Error('Could not locate built APK after running Gradle')
+        apkToInstall = built
+      }
+
+      const output = await execAdb(['install', '-r', apkToInstall], deviceId)
       return { device: deviceInfo, installed: true, output }
     } catch (e) {
       return { device: deviceInfo, installed: false, error: e instanceof Error ? e.message : String(e) }

@@ -3,6 +3,8 @@ import { spawn } from "child_process"
 import { StartAppResponse, TerminateAppResponse, RestartAppResponse, ResetAppDataResponse, WaitForElementResponse, TapResponse } from "../types.js"
 import { execCommand, getIOSDeviceMetadata, validateBundleId, IDB } from "./utils.js"
 import { iOSObserve } from "./observe.js"
+import path from "path"
+import { existsSync } from "fs"
 
 export class iOSInteract {
   private observe = new iOSObserve();
@@ -82,37 +84,91 @@ export class iOSInteract {
   }
 
   async installApp(appPath: string, deviceId: string = "booted"): Promise<import("../types.js").InstallAppResponse> {
-    // Try simulator install first
     const device = await getIOSDeviceMetadata(deviceId)
-    try {
-      const res = await execCommand(['simctl', 'install', deviceId, appPath], deviceId)
-      return { device, installed: true, output: res.output }
-    } catch (e) {
-      // If simctl fails and idb is available, try idb install for physical devices
-      try {
-        const child = spawn(IDB, ['--version'])
-        const idbExists = await new Promise<boolean>((resolve) => {
-          child.on('error', () => resolve(false));
-          child.on('close', (code) => resolve(code === 0));
-        });
-        if (idbExists) {
-          // Use idb to install (works for physical devices and simulators)
-          await new Promise<void>((resolve, reject) => {
-            const proc = spawn(IDB, ['install', appPath, '--udid', device.id]);
-            let stderr = '';
-            proc.stderr.on('data', d => stderr += d.toString());
-            proc.on('close', code => {
-              if (code === 0) resolve();
-              else reject(new Error(stderr || `idb install failed with code ${code}`));
-            });
-            proc.on('error', err => reject(err));
-          });
-          return { device, installed: true }
+
+    // Helper to find .app bundles under a directory
+    async function findAppBundle(dir: string): Promise<string | undefined> {
+      const entries = await fs.readdir(dir, { withFileTypes: true }).catch(() => [])
+      for (const e of entries) {
+        const full = path.join(dir, e.name)
+        if (e.isDirectory()) {
+          if (full.endsWith('.app')) return full
+          const found = await findAppBundle(full)
+          if (found) return found
         }
-      } catch (inner) {
-        // fallthrough
+      }
+      return undefined
+    }
+
+    try {
+      let toInstall = appPath
+
+      const stat = await fs.stat(appPath).catch(() => null)
+      if (stat && stat.isDirectory()) {
+        // If directory already contains a .app, use it
+        const found = await findAppBundle(appPath)
+        if (found) {
+          toInstall = found
+        } else {
+          // Attempt to locate an Xcode project and build for simulator
+          const files = await fs.readdir(appPath).catch(() => [])
+          const proj = files.find(f => f.endsWith('.xcodeproj'))
+          if (!proj) throw new Error('No .app bundle or Xcode project found in directory')
+
+          const projectPath = path.join(appPath, proj)
+          const scheme = proj.replace(/\.xcodeproj$/, '')
+
+          await new Promise<void>((resolve, reject) => {
+            const args = ['-project', projectPath, '-scheme', scheme, '-configuration', 'Debug', '-sdk', 'iphonesimulator', 'build', '-quiet']
+            const proc = spawn('xcodebuild', args, { cwd: appPath })
+            let stderr = ''
+            proc.stderr?.on('data', d => stderr += d.toString())
+            proc.on('close', code => {
+              if (code === 0) resolve()
+              else reject(new Error(stderr || `xcodebuild failed with code ${code}`))
+            })
+            proc.on('error', err => reject(err))
+          })
+
+          const built = await findAppBundle(appPath)
+          if (!built) throw new Error('Could not locate built .app after xcodebuild')
+          toInstall = built
+        }
       }
 
+      // Try simulator install first
+      try {
+        const res = await execCommand(['simctl', 'install', deviceId, toInstall], deviceId)
+        return { device, installed: true, output: res.output }
+      } catch (e) {
+        // If simctl fails and idb is available, try idb install for physical devices
+        try {
+          const child = spawn(IDB, ['--version'])
+          const idbExists = await new Promise<boolean>((resolve) => {
+            child.on('error', () => resolve(false));
+            child.on('close', (code) => resolve(code === 0));
+          });
+          if (idbExists) {
+            // Use idb to install (works for physical devices and simulators)
+            await new Promise<void>((resolve, reject) => {
+              const proc = spawn(IDB, ['install', toInstall, '--udid', device.id]);
+              let stderr = '';
+              proc.stderr.on('data', d => stderr += d.toString());
+              proc.on('close', code => {
+                if (code === 0) resolve();
+                else reject(new Error(stderr || `idb install failed with code ${code}`));
+              });
+              proc.on('error', err => reject(err));
+            });
+            return { device, installed: true }
+          }
+        } catch (inner) {
+          // fallthrough
+        }
+
+        return { device, installed: false, error: e instanceof Error ? e.message : String(e) }
+      }
+    } catch (e) {
       return { device, installed: false, error: e instanceof Error ? e.message : String(e) }
     }
   }
