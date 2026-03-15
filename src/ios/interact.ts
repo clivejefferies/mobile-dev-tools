@@ -82,6 +82,57 @@ export class iOSInteract {
     }
   }
 
+  async build(projectPath: string, _variant?: string): Promise<{ artifactPath: string, output?: string } | { error: string }> {
+    void _variant
+    try {
+      async function findAppBundle(dir: string): Promise<string | undefined> {
+        const entries = await fs.readdir(dir, { withFileTypes: true }).catch(() => [])
+        for (const e of entries) {
+          const full = path.join(dir, e.name)
+          if (e.isDirectory()) {
+            if (full.endsWith('.app')) return full
+            const found = await findAppBundle(full)
+            if (found) return found
+          }
+        }
+        return undefined
+      }
+
+      const files = await fs.readdir(projectPath).catch(() => [])
+      const workspace = files.find(f => f.endsWith('.xcworkspace'))
+      const proj = files.find(f => f.endsWith('.xcodeproj'))
+      if (!workspace && !proj) return { error: 'No Xcode project or workspace found' }
+
+      let buildArgs: string[]
+      if (workspace) {
+        const workspacePath = path.join(projectPath, workspace)
+        const scheme = workspace.replace(/\.xcworkspace$/, '')
+        buildArgs = ['-workspace', workspacePath, '-scheme', scheme, '-configuration', 'Debug', '-sdk', 'iphonesimulator', 'build']
+      } else {
+        const projectPathFull = path.join(projectPath, proj!)
+        const scheme = proj!.replace(/\.xcodeproj$/, '')
+        buildArgs = ['-project', projectPathFull, '-scheme', scheme, '-configuration', 'Debug', '-sdk', 'iphonesimulator', 'build']
+      }
+
+      await new Promise<void>((resolve, reject) => {
+        const proc = spawn('xcodebuild', buildArgs, { cwd: projectPath })
+        let stderr = ''
+        proc.stderr?.on('data', d => stderr += d.toString())
+        proc.on('close', code => {
+          if (code === 0) resolve()
+          else reject(new Error(stderr || `xcodebuild failed with code ${code}`))
+        })
+        proc.on('error', err => reject(err))
+      })
+
+      const built = await findAppBundle(projectPath)
+      if (!built) return { error: 'Could not find .app after build' }
+      return { artifactPath: built }
+    } catch (e) {
+      return { error: e instanceof Error ? e.message : String(e) }
+    }
+  }
+
   async installApp(appPath: string, deviceId: string = "booted"): Promise<import("../types.js").InstallAppResponse> {
     const device = await getIOSDeviceMetadata(deviceId)
 
@@ -104,44 +155,49 @@ export class iOSInteract {
 
       const stat = await fs.stat(appPath).catch(() => null)
       if (stat && stat.isDirectory()) {
-        // If directory already contains a .app, use it
-        const found = await findAppBundle(appPath)
-        if (found) {
-          toInstall = found
+        // If the provided path is already an .app bundle, use it directly
+        if (appPath.endsWith('.app')) {
+          toInstall = appPath
         } else {
-          // Attempt to locate an Xcode project and build for simulator
-          const files = await fs.readdir(appPath).catch(() => [])
-          // Prefer workspace when present (CocoaPods / multi-project setups)
-          const workspace = files.find(f => f.endsWith('.xcworkspace'))
-          const proj = files.find(f => f.endsWith('.xcodeproj'))
-          if (!workspace && !proj) throw new Error('No .app bundle, .xcworkspace or .xcodeproj found in directory')
-
-          let buildArgs: string[]
-          let scheme: string
-          if (workspace) {
-            const workspacePath = path.join(appPath, workspace)
-            scheme = workspace.replace(/\.xcworkspace$/, '')
-            buildArgs = ['-workspace', workspacePath, '-scheme', scheme, '-configuration', 'Debug', '-sdk', 'iphonesimulator', 'build', '-quiet']
+          // If directory already contains a .app, use it
+          const found = await findAppBundle(appPath)
+          if (found) {
+            toInstall = found
           } else {
-            const projectPath = path.join(appPath, proj!)
-            scheme = proj!.replace(/\.xcodeproj$/, '')
-            buildArgs = ['-project', projectPath, '-scheme', scheme, '-configuration', 'Debug', '-sdk', 'iphonesimulator', 'build', '-quiet']
-          }
+            // Attempt to locate an Xcode project and build for simulator
+            const files = await fs.readdir(appPath).catch(() => [])
+            // Prefer workspace when present (CocoaPods / multi-project setups)
+            const workspace = files.find(f => f.endsWith('.xcworkspace'))
+            const proj = files.find(f => f.endsWith('.xcodeproj'))
+            if (!workspace && !proj) throw new Error('No .app bundle, .xcworkspace or .xcodeproj found in directory')
 
-          await new Promise<void>((resolve, reject) => {
-            const proc = spawn('xcodebuild', buildArgs, { cwd: appPath })
-            let stderr = ''
-            proc.stderr?.on('data', d => stderr += d.toString())
-            proc.on('close', code => {
-              if (code === 0) resolve()
-              else reject(new Error(stderr || `xcodebuild failed with code ${code}`))
+            let buildArgs: string[]
+            let scheme: string
+            if (workspace) {
+              const workspacePath = path.join(appPath, workspace)
+              scheme = workspace.replace(/\.xcworkspace$/, '')
+              buildArgs = ['-workspace', workspacePath, '-scheme', scheme, '-configuration', 'Debug', '-sdk', 'iphonesimulator', 'build', '-quiet']
+            } else {
+              const projectPath = path.join(appPath, proj!)
+              scheme = proj!.replace(/\.xcodeproj$/, '')
+              buildArgs = ['-project', projectPath, '-scheme', scheme, '-configuration', 'Debug', '-sdk', 'iphonesimulator', 'build', '-quiet']
+            }
+
+            await new Promise<void>((resolve, reject) => {
+              const proc = spawn('xcodebuild', buildArgs, { cwd: appPath })
+              let stderr = ''
+              proc.stderr?.on('data', d => stderr += d.toString())
+              proc.on('close', code => {
+                if (code === 0) resolve()
+                else reject(new Error(stderr || `xcodebuild failed with code ${code}`))
+              })
+              proc.on('error', err => reject(err))
             })
-            proc.on('error', err => reject(err))
-          })
 
-          const built = await findAppBundle(appPath)
-          if (!built) throw new Error('Could not locate built .app after xcodebuild')
-          toInstall = built
+            const built = await findAppBundle(appPath)
+            if (!built) throw new Error('Could not locate built .app after xcodebuild')
+            toInstall = built
+          }
         }
       }
 

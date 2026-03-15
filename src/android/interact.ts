@@ -93,6 +93,61 @@ export class AndroidInteract {
     }
   }
 
+  async build(projectPath: string, _variant?: string): Promise<{ artifactPath: string, output?: string } | { error: string }> {
+    void _variant
+    // Attempt to build using gradlew/gradle and return first found APK
+    try {
+      const { prepareGradle } = await import('./utils.js').catch(() => ({ prepareGradle: undefined })) as any
+      if (prepareGradle && typeof prepareGradle === 'function') {
+        const { execCmd, gradleArgs, spawnOpts } = await prepareGradle(projectPath)
+        await new Promise<void>((resolve, reject) => {
+          const proc = spawn(execCmd, gradleArgs, spawnOpts)
+          let stderr = ''
+          proc.stderr?.on('data', d => stderr += d.toString())
+          proc.on('close', code => {
+            if (code === 0) resolve()
+            else reject(new Error(stderr || `Gradle failed with code ${code}`))
+          })
+          proc.on('error', err => reject(err))
+        })
+      } else {
+        const gradlewPath = path.join(projectPath, 'gradlew')
+        const gradleCmd = existsSync(gradlewPath) ? './gradlew' : 'gradle'
+        const execCmd = existsSync(gradlewPath) ? gradlewPath : gradleCmd
+        const gradleArgs = ['assembleDebug']
+        await new Promise<void>((resolve, reject) => {
+          const proc = spawn(execCmd, gradleArgs, { cwd: projectPath, shell: existsSync(gradlewPath) ? false : true })
+          let stderr = ''
+          proc.stderr?.on('data', d => stderr += d.toString())
+          proc.on('close', code => {
+            if (code === 0) resolve()
+            else reject(new Error(stderr || `Gradle failed with code ${code}`))
+          })
+          proc.on('error', err => reject(err))
+        })
+      }
+      // Find built APK
+      async function findApk(dir: string): Promise<string | undefined> {
+        const entries = await fs.readdir(dir, { withFileTypes: true }).catch(() => [])
+        for (const e of entries) {
+          const full = path.join(dir, e.name)
+          if (e.isDirectory()) {
+            const found = await findApk(full)
+            if (found) return found
+          } else if (e.isFile() && full.endsWith('.apk')) {
+            return full
+          }
+        }
+        return undefined
+      }
+      const apk = await findApk(projectPath)
+      if (!apk) return { error: 'Could not find APK after build' }
+      return { artifactPath: apk }
+    } catch (e) {
+      return { error: e instanceof Error ? e.message : String(e) }
+    }
+  }
+
   async installApp(apkPath: string, deviceId?: string): Promise<import("../types.js").InstallAppResponse> {
     const metadata = await getAndroidDeviceMetadata("", deviceId)
     const deviceInfo = getDeviceInfo(deviceId || 'default', metadata)

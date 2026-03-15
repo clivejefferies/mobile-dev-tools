@@ -1,9 +1,47 @@
 import { spawn } from 'child_process'
 import { DeviceInfo } from "../types.js"
-import { createWriteStream, promises as fsPromises } from 'fs'
+import { createWriteStream, promises as fsPromises, existsSync } from 'fs'
 import path from 'path'
+import { detectJavaHome } from '../utils/java.js'
 
 export const ADB = process.env.ADB_PATH || 'adb'
+
+/**
+ * Prepare Gradle execution options for building an Android project.
+ * Returns execCmd (wrapper or gradle), base gradleArgs array, and spawn options including env.
+ */
+export async function prepareGradle(projectPath: string): Promise<{ execCmd: string, gradleArgs: string[], spawnOpts: any }> {
+  const gradlewPath = path.join(projectPath, 'gradlew')
+  const gradleCmd = existsSync(gradlewPath) ? './gradlew' : 'gradle'
+  const execCmd = existsSync(gradlewPath) ? gradlewPath : gradleCmd
+
+  const gradleArgs: string[] = ['assembleDebug']
+
+  const detectedJavaHome = await detectJavaHome().catch(() => undefined)
+  const env = Object.assign({}, process.env)
+  if (detectedJavaHome) {
+    if (env.JAVA_HOME !== detectedJavaHome) {
+      env.JAVA_HOME = detectedJavaHome
+      env.PATH = `${path.join(detectedJavaHome, 'bin')}${path.delimiter}${env.PATH || ''}`
+    }
+    gradleArgs.push(`-Dorg.gradle.java.home=${detectedJavaHome}`)
+    gradleArgs.push('--no-daemon')
+    env.GRADLE_JAVA_HOME = detectedJavaHome
+  }
+
+  try { delete env.SHELL } catch {}
+
+  const useWrapper = existsSync(gradlewPath)
+  const spawnOpts: any = { cwd: projectPath, env }
+  if (useWrapper) {
+    try { await fsPromises.chmod(gradlewPath, 0o755) } catch {}
+    spawnOpts.shell = false
+  } else {
+    spawnOpts.shell = true
+  }
+
+  return { execCmd, gradleArgs, spawnOpts }
+}
 
 
 // Helper to construct ADB args with optional device ID

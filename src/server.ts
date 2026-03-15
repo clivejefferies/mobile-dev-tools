@@ -439,6 +439,18 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         return wrapResponse(response)
       }
 
+      if (name === 'build_and_install') {
+        const { platform, projectPath, deviceId, timeout } = args as any
+        const res = await ToolsInteract.buildAndInstallHandler({ platform, projectPath, deviceId, timeout })
+        // res: { ndjson, result }
+        return {
+          content: [
+            { type: 'text', text: res.ndjson },
+            { type: 'text', text: JSON.stringify(res.result, null, 2) }
+          ]
+        }
+      }
+
 
     if (name === "get_logs") {
       const { platform, appId, deviceId, lines } = args as any
