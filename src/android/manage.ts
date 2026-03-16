@@ -10,35 +10,19 @@ export class AndroidManage {
   async build(projectPath: string, _variant?: string): Promise<{ artifactPath: string, output?: string } | { error: string }> {
     void _variant
     try {
-      const { prepareGradle } = await import('./utils.js').catch(() => ({ prepareGradle: undefined })) as any
-      if (prepareGradle && typeof prepareGradle === 'function') {
-        const { execCmd, gradleArgs, spawnOpts } = await prepareGradle(projectPath)
-        await new Promise<void>((resolve, reject) => {
-          const proc = spawn(execCmd, gradleArgs, spawnOpts)
-          let stderr = ''
-          proc.stderr?.on('data', d => stderr += d.toString())
-          proc.on('close', code => {
-            if (code === 0) resolve()
-            else reject(new Error(stderr || `Gradle failed with code ${code}`))
-          })
-          proc.on('error', err => reject(err))
+      // Always use the shared prepareGradle utility for consistent env/setup
+      const { execCmd, gradleArgs, spawnOpts } = await (await import('./utils.js')).prepareGradle(projectPath)
+      await new Promise<void>((resolve, reject) => {
+        const proc = spawn(execCmd, gradleArgs, spawnOpts)
+        let stderr = ''
+        proc.stderr?.on('data', d => stderr += d.toString())
+        proc.on('close', code => {
+          if (code === 0) resolve()
+          else reject(new Error(stderr || `Gradle failed with code ${code}`))
         })
-      } else {
-        const gradlewPath = path.join(projectPath, 'gradlew')
-        const gradleCmd = existsSync(gradlewPath) ? './gradlew' : 'gradle'
-        const execCmd = existsSync(gradlewPath) ? gradlewPath : gradleCmd
-        const gradleArgs = ['assembleDebug']
-        await new Promise<void>((resolve, reject) => {
-          const proc = spawn(execCmd, gradleArgs, { cwd: projectPath, shell: existsSync(gradlewPath) ? false : true })
-          let stderr = ''
-          proc.stderr?.on('data', d => stderr += d.toString())
-          proc.on('close', code => {
-            if (code === 0) resolve()
-            else reject(new Error(stderr || `Gradle failed with code ${code}`))
-          })
-          proc.on('error', err => reject(err))
-        })
-      }
+        proc.on('error', err => reject(err))
+      })
+    
       const apk = await findApk(projectPath)
       if (!apk) return { error: 'Could not find APK after build' }
       return { artifactPath: apk }
