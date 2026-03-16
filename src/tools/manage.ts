@@ -3,7 +3,7 @@ import path from 'path'
 import { resolveTargetDevice, listDevices } from '../resolve-device.js'
 import { AndroidManage } from '../android/manage.js'
 import { iOSManage } from '../ios/manage.js'
-import type { InstallAppResponse, StartAppResponse, TerminateAppResponse, RestartAppResponse, ResetAppDataResponse } from '../types'
+import type { InstallAppResponse, StartAppResponse, TerminateAppResponse, RestartAppResponse, ResetAppDataResponse } from '../types.js'
 
 export class ToolsManage {
   static async buildAppHandler({ platform, projectPath, variant }: { platform?: 'android' | 'ios', projectPath: string, variant?: string }) {
