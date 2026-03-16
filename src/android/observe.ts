@@ -1,7 +1,7 @@
 import { spawn } from "child_process"
 import { XMLParser } from "fast-xml-parser"
 import { GetLogsResponse, CaptureAndroidScreenResponse, GetUITreeResponse, GetCurrentScreenResponse, UIElement, DeviceInfo } from "../types.js"
-import { ADB, execAdb, getAndroidDeviceMetadata, getDeviceInfo, delay, parseBounds, getCenter, getScreenResolution, traverseNode, parseLogLine } from "./utils.js"
+import { ADB, execAdb, getAndroidDeviceMetadata, getDeviceInfo, delay, getScreenResolution, traverseNode, parseLogLine } from "./utils.js"
 import { createWriteStream } from "fs"
 import { promises as fsPromises } from "fs"
 import path from "path"
@@ -385,7 +385,7 @@ export class AndroidObserve {
       const crashEntry = entries.find(e => e.crash)
       const crash_summary = crashEntry ? { crash_detected: true, exception: crashEntry.exception, sample: crashEntry.message } : { crash_detected: false }
       return { entries, crash_summary }
-    } catch (e) {
+    } catch {
       return { entries: [], crash_summary: { crash_detected: false } }
     }
   }

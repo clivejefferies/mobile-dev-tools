@@ -1,9 +1,7 @@
-import { promises as fs } from "fs"
 import { spawn } from "child_process"
-import { StartAppResponse, TerminateAppResponse, RestartAppResponse, ResetAppDataResponse, WaitForElementResponse, TapResponse } from "../types.js"
-import { execCommand, getIOSDeviceMetadata, validateBundleId, IDB } from "./utils.js"
+import { WaitForElementResponse, TapResponse } from "../types.js"
+import { getIOSDeviceMetadata, IDB } from "./utils.js"
 import { iOSObserve } from "./observe.js"
-import path from "path"
 
 export class iOSInteract {
   private observe = new iOSObserve();

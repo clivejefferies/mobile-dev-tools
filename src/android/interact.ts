@@ -1,4 +1,4 @@
-import { StartAppResponse, TerminateAppResponse, RestartAppResponse, ResetAppDataResponse, WaitForElementResponse, TapResponse, SwipeResponse, TypeTextResponse, PressBackResponse } from "../types.js"
+import { WaitForElementResponse, TapResponse, SwipeResponse, TypeTextResponse, PressBackResponse } from "../types.js"
 import { execAdb, getAndroidDeviceMetadata, getDeviceInfo } from "./utils.js"
 import { AndroidObserve } from "./observe.js"
 

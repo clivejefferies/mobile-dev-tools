@@ -1,6 +1,6 @@
 import { spawn } from 'child_process'
 import { DeviceInfo, UIElement } from "../types.js"
-import { createWriteStream, promises as fsPromises, existsSync } from 'fs'
+import { promises as fsPromises, existsSync } from 'fs'
 import path from 'path'
 import { detectJavaHome } from '../utils/java.js'
 
@@ -327,7 +327,7 @@ export function traverseNode(node: any, elements: UIElement[], parentIndex: numb
 
 // Log stream management (one stream per session)
 
-const activeLogStreams: Map<string, { proc: any, file: string }> = new Map()
+// (Legacy active stream map removed from utils during refactor; Observe modules manage their own active streams.)
 
 // Robust log line parser supporting multiple logcat formats
 export function parseLogLine(line: string) {  // Collapse internal newlines so multiline stack traces are parseable as a single entry

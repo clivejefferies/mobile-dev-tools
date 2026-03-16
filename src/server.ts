@@ -19,8 +19,6 @@ import { ToolsInteract } from './tools/interact.js'
 import { ToolsObserve } from './tools/observe.js'
 import { AndroidManage } from './android/manage.js'
 import { iOSManage } from './ios/manage.js'
-import { AndroidObserve } from './android/observe.js'
-import { iOSObserve } from './ios/observe.js'
 
 
 const server = new Server(
