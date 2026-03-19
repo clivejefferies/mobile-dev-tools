@@ -1,5 +1,5 @@
-import { iOSObserve } from '../src/ios/observe.js';
-import { iOSManage } from '../src/ios/manage.js';
+import { iOSObserve } from '../../ios/observe.js';
+import { iOSManage } from '../../ios/manage.js';
 
 async function main() {
   const appId = process.argv[2] || 'com.apple.springboard';

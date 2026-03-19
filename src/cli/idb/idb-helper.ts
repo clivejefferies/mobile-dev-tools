@@ -1,6 +1,5 @@
 import { execSync, spawnSync } from 'child_process'
 import fs from 'fs'
-import path from 'path'
 
 export function getConfiguredIdbPath(): string | undefined {
   if (process.env.MCP_IDB_PATH) return process.env.MCP_IDB_PATH

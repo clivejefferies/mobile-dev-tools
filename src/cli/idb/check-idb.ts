@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { execSync, spawnSync } from 'child_process'
-import { main as installMain } from './install-idb'
-import { getIdbCmd, isIDBInstalled } from './idb-helper'
+import { main as installMain } from './install-idb.js'
+import { getIdbCmd, isIDBInstalled } from './idb-helper.js'
 
 function which(cmd: string): string | null {
   try {
@@ -24,7 +24,7 @@ async function runInstaller() {
     // prefer invoking the TS script via npx/tsx to ensure environment
     const runner = which('npx') ? 'npx' : which('tsx') ? 'tsx' : null
     if (runner) {
-      const args = runner === 'npx' ? ['tsx', './scripts/install-idb.ts'] : ['./scripts/install-idb.ts']
+      const args = runner === 'npx' ? ['tsx', './src/cli/idb/install-idb.ts'] : ['./src/cli/idb/install-idb.ts']
       const res = spawnSync(runner, args, { stdio: 'inherit' as any })
       return typeof res.status === 'number' ? res.status === 0 : false
     }
@@ -59,7 +59,7 @@ try {
   const auto = process.env.MCP_AUTO_INSTALL_IDB === 'true'
   if (auto) {
     print('MCP_AUTO_INSTALL_IDB=true, attempting installer...')
-    const ok = runInstaller()
+    const ok = await runInstaller()
     if (ok) process.exit(0)
     print('Installer failed or did not produce idb')
     process.exit(2)

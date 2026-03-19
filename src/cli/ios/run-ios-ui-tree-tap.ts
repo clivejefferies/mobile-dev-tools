@@ -1,5 +1,5 @@
-import { iOSObserve } from '../src/ios/observe.js';
-import { iOSInteract } from '../src/ios/interact.js';
+import { iOSObserve } from '../../ios/observe.js';
+import { iOSInteract } from '../../ios/interact.js';
 
 async function main() {
   const deviceId = 'booted';
@@ -18,7 +18,7 @@ async function main() {
     process.exit(3);
   }
 
-  const clickable = tree.elements.find(e => e.clickable) || tree.elements[0];
+  const clickable = tree.elements.find((e: any) => e.clickable) || tree.elements[0];
   console.log('Using element:', clickable.text || '(no text)', 'clickable=', clickable.clickable, 'center=', clickable.center);
   const [x,y] = clickable.center || [0,0];
 
