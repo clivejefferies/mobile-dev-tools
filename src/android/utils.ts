@@ -4,7 +4,7 @@ import { promises as fsPromises, existsSync } from 'fs'
 import path from 'path'
 import { detectJavaHome } from '../utils/java.js'
 
-export const ADB = process.env.ADB_PATH || 'adb'
+export function getAdbCmd() { return process.env.ADB_PATH || 'adb' }
 
 /**
  * Prepare Gradle execution options for building an Android project.
@@ -78,7 +78,7 @@ export function execAdb(args: string[], deviceId?: string, options: SpawnOptions
     const { timeout: customTimeout, ...spawnOptions } = options;
     
     // Use spawn instead of execFile for better stream control and to avoid potential buffering hangs
-    const child = spawn(ADB, adbArgs, spawnOptions)
+    const child = spawn(getAdbCmd(), adbArgs, spawnOptions)
     
     let stdout = ''
     let stderr = ''
@@ -126,7 +126,7 @@ export function spawnAdb(args: string[], deviceId?: string, options: SpawnOption
   const adbArgs = getAdbArgs(args, deviceId)
   return new Promise((resolve, reject) => {
     const { timeout: customTimeout, ...spawnOptions } = options
-    const child = spawn(ADB, adbArgs, spawnOptions)
+    const child = spawn(getAdbCmd(), adbArgs, spawnOptions)
 
     let stdout = ''
     let stderr = ''

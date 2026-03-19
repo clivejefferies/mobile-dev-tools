@@ -2,6 +2,16 @@
 
 All notable changes to the **Mobile Debug MCP** project will be documented in this file.
 
+## [0.12.0]
+- Add iOS idb integration: config-driven idb path resolution (MCP_IDB_PATH / MCP config / IDB_PATH), robust idb detection and parsing of `ui describe-all` output.
+- Add reusable helpers: `isIDBInstalled()` and `getIdbCmd()` to centralise idb resolution and diagnostics.
+- Ensure install_app can build binaries (xcodebuild / Gradle) before installing so agents can autonomously build, install and validate fixes.
+- Add idb integration test (UI-tree + tap) and reorganise device-dependent tests under `test/device`.
+- Gate device tests behind RUN_DEVICE_TESTS (device tests won't run in default CI); added `test:device` runner and updated npm scripts.
+- Linting & tooling fixes: ESLint adjustments (ignore generated scripts), ESM entry fix for install-idb.ts, and various lint cleanups.
+- Added `test/device/README.md` with device-test run instructions.
+
+
 ## [0.11.0]
 - Tools refactor - broke functions into 3 distinct class types; interact (for UI manipulation), manage (for build, installing etc) and observe (observing the app whilst running)
 - Add convenience method to build and install

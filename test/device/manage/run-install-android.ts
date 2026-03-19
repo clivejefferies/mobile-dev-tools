@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { AndroidInteract } from '../../dist/android/interact.js'
+import { AndroidManage } from '../../../dist/android/manage.js'
 
 async function main() {
   const [, , appPath, deviceId] = process.argv
@@ -8,11 +8,11 @@ async function main() {
     process.exit(1)
   }
 
-  const inter = new AndroidInteract()
+  const mgr = new AndroidManage()
   try {
-    const res = await inter.installApp(appPath, deviceId)
+    const res = await mgr.installApp(appPath, deviceId)
     console.log(JSON.stringify(res, null, 2))
-  } catch {
+  } catch (err:any) {
     console.error('Install failed:', err instanceof Error ? err.message : String(err))
     process.exit(2)
   }

@@ -146,6 +146,19 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       }
     },
     {
+      name: "build_app",
+      description: "Build a project for Android or iOS and return the built artifact path. Does not install.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          platform: { type: "string", enum: ["android", "ios"], description: "Optional. If omitted the server will attempt to detect platform from projectPath files." },
+          projectPath: { type: "string", description: "Path to project directory (contains gradlew or xcodeproj/xcworkspace)" },
+          variant: { type: "string", description: "Optional build variant (e.g., Debug/Release)" }
+        },
+        required: ["projectPath"]
+      }
+    },
+    {
       name: "get_logs",
       description: "Get recent logs from Android or iOS simulator. Returns device metadata and the log output.",
       inputSchema: {
@@ -436,6 +449,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           error: (res as any).error
         }
         return wrapResponse(response)
+      }
+
+      if (name === "build_app") {
+        const { platform, projectPath, variant } = args as any
+        const res = await ToolsManage.buildAppHandler({ platform, projectPath, variant })
+        return wrapResponse(res)
       }
 
       if (name === 'build_and_install') {

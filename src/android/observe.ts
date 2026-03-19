@@ -1,7 +1,7 @@
 import { spawn } from "child_process"
 import { XMLParser } from "fast-xml-parser"
 import { GetLogsResponse, CaptureAndroidScreenResponse, GetUITreeResponse, GetCurrentScreenResponse, UIElement, DeviceInfo } from "../types.js"
-import { ADB, execAdb, getAndroidDeviceMetadata, getDeviceInfo, delay, getScreenResolution, traverseNode, parseLogLine } from "./utils.js"
+import { getAdbCmd, execAdb, getAndroidDeviceMetadata, getDeviceInfo, delay, getScreenResolution, traverseNode, parseLogLine } from "./utils.js"
 import { createWriteStream } from "fs"
 import { promises as fsPromises } from "fs"
 import path from "path"
@@ -81,7 +81,7 @@ export class AndroidObserve {
         elements
       };
     } catch (e) {
-      const errorMessage = `Failed to get UI tree. ADB Path: '${ADB}'. Error: ${e instanceof Error ? e.message : String(e)}`;
+      const errorMessage = `Failed to get UI tree. ADB Path: '${getAdbCmd()}'. Error: ${e instanceof Error ? e.message : String(e)}`;
       console.error(errorMessage);
       return {
           device: deviceInfo,
@@ -136,7 +136,7 @@ export class AndroidObserve {
       const args = deviceId ? ['-s', deviceId, 'exec-out', 'screencap', '-p'] : ['exec-out', 'screencap', '-p'];
       
       // Using spawn for screencap as well to ensure consistent process handling
-      const child = spawn(ADB, args)
+      const child = spawn(getAdbCmd(), args)
       
       const chunks: Buffer[] = []
       let stderr = ''
@@ -283,7 +283,7 @@ export class AndroidObserve {
       }
 
       const args = ['logcat', `--pid=${pid}`, filter]
-      const proc = spawn(ADB, args)
+      const proc = spawn(getAdbCmd(), args)
 
       const tmpDir = process.env.TMPDIR || '/tmp'
       const file = path.join(tmpDir, `mobile-debug-log-${sessionId}.ndjson`)

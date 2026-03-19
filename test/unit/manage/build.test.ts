@@ -9,28 +9,22 @@ async function makeTempProject(platform: 'android' | 'ios') {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), `mcp-build-${platform}-`))
   if (platform === 'android') {
     const gradlew = path.join(dir, 'gradlew')
-    const script = `#!/usr/bin/env node
-const fs = require('fs')
-const path = require('path')
-const apk = path.join(process.cwd(),'app','build','outputs','apk','debug','app-debug.apk')
-fs.mkdirSync(path.dirname(apk), { recursive: true })
-fs.writeFileSync(apk, 'fake-apk')
-console.log('BUILD SUCCESS')
-process.exit(0)
+    const script = `#!/bin/sh
+mkdir -p "$(pwd)/app/build/outputs/apk/debug"
+echo 'fake-apk' > "$(pwd)/app/build/outputs/apk/debug/app-debug.apk"
+echo 'BUILD SUCCESS'
+exit 0
 `
     await fs.writeFile(gradlew, script, { mode: 0o755 })
   } else {
     // create minimal Xcode workspace structure
     const ws = path.join(dir, 'Example.xcworkspace')
     await fs.writeFile(ws, '')
-    const script = `#!/usr/bin/env node
-const fs = require('fs')
-const path = require('path')
-const app = path.join(process.cwd(),'Build','Products','Debug-iphonesimulator','Example.app')
-fs.mkdirSync(app, { recursive: true })
-fs.writeFileSync(path.join(app,'Info.plist'), '<plist/>')
-console.log('BUILD SUCCESS')
-process.exit(0)
+    const script = `#!/bin/sh
+mkdir -p "$(pwd)/Build/Products/Debug-iphonesimulator/Example.app"
+echo '<plist/>' > "$(pwd)/Build/Products/Debug-iphonesimulator/Example.app/Info.plist"
+echo 'BUILD SUCCESS'
+exit 0
 `
     const xbuild = path.join(dir, 'xcodebuild')
     await fs.writeFile(xbuild, script, { mode: 0o755 })
@@ -58,9 +52,12 @@ process.exit(0)
   await fs.writeFile(xcodePath, xcodeScript, { mode: 0o755 })
 
   const origPath = process.env.PATH || ''
+  const origXcode = process.env.XCODEBUILD_PATH
   process.env.PATH = `${binDir}:${origPath}`
+  // Prefer explicit XCODEBUILD_PATH to ensure deterministic behavior
+  process.env.XCODEBUILD_PATH = xcodePath
 
-  const { ToolsManage } = await import('../../src/tools/manage.js')
+  const { ToolsManage } = await import('../../../src/tools/manage.js')
 
   try {
     const ares = await ToolsManage.buildAppHandler({ platform: 'android', projectPath: androidProject })
@@ -78,6 +75,8 @@ process.exit(0)
     await fs.rm(iosProject, { recursive: true, force: true }).catch(() => {})
     await fs.rm(binDir, { recursive: true, force: true }).catch(() => {})
     process.env.PATH = origPath
+    if (typeof origXcode !== 'undefined') process.env.XCODEBUILD_PATH = origXcode
+    else delete process.env.XCODEBUILD_PATH
   }
 }
 

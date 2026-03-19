@@ -1,7 +1,7 @@
 import { promises as fs } from 'fs'
 import os from 'os'
 import path from 'path'
-import { AndroidObserve } from '../../src/android/observe.js'
+import { AndroidObserve } from '../../../src/android/observe.js'
 
 async function run() {
   const tmp = os.tmpdir()

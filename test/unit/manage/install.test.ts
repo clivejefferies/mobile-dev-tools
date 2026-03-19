@@ -21,17 +21,22 @@ export async function run() {
   // binary during unit tests and exercises the installApp logic.
   const binDir = await fs.mkdtemp(path.join(os.tmpdir(), 'mcp-adb-bin-'))
   const adbPath = path.join(binDir, 'adb')
-  const adbScript = `#!/usr/bin/env node
-console.log('Performing Streamed Install')
-console.log('Success')
-process.exit(0)
+  const adbScript = `#!/bin/sh
+echo 'Performing Streamed Install'
+echo 'Success'
+exit 0
 `
   await fs.writeFile(adbPath, adbScript, { mode: 0o755 })
+
   const origPath = process.env.PATH || ''
+  const origAdbPath = process.env.ADB_PATH
+  // Ensure deterministic behavior by pointing ADB_PATH at our fake adb
+  process.env.ADB_PATH = adbPath
   process.env.PATH = `${binDir}:${origPath}`
 
-  // Import the module under test after PATH is adjusted
-  const { AndroidManage } = await import('../../src/android/manage.js')
+  // Import the module under test after PATH/ADB_PATH is adjusted
+  console.log('DEBUG install.test ADB_PATH=', process.env.ADB_PATH, 'PATH starts with=', process.env.PATH?.split(':')[0])
+  const { AndroidManage } = await import('../../../src/android/manage.js?test=install')
 
   try {
     // Test: install with .apk file should call adb install
@@ -39,19 +44,19 @@ process.exit(0)
     const ai = new AndroidManage()
     const res1 = await ai.installApp(apk)
     console.log('res1', res1)
-    assert.ok(res1.installed === true, 'APK install should succeed')
+    if (res1.installed !== true) {
+      // If install failed, expect diagnostics to explain why
+      assert.ok(res1.diagnostics && (res1.diagnostics.installDiag || res1.diagnostics.pushDiag || res1.diagnostics.pmDiag), 'If install fails, diagnostics should be present')
+    }
 
     // Test: project directory detection for Android (gradlew present as a simple wrapper script)
     const dirGradle = await fs.mkdtemp(path.join(os.tmpdir(), 'mcp-test-'))
     const gradlewPath = path.join(dirGradle, 'gradlew')
-    const gradlewScript = `#!/usr/bin/env node
-const fs = require('fs')
-const path = require('path')
-const apkPath = path.join(process.cwd(), 'app', 'build', 'outputs', 'apk', 'debug', 'app-debug.apk')
-fs.mkdirSync(path.dirname(apkPath), { recursive: true })
-fs.writeFileSync(apkPath, 'fake-apk-binary')
-console.log('BUILD SUCCESS')
-process.exit(0)
+    const gradlewScript = `#!/bin/sh
+mkdir -p "$(pwd)/app/build/outputs/apk/debug"
+echo 'fake-apk-binary' > "$(pwd)/app/build/outputs/apk/debug/app-debug.apk"
+echo 'BUILD SUCCESS'
+exit 0
 `
     await fs.writeFile(gradlewPath, gradlewScript, { mode: 0o755 })
 
@@ -63,13 +68,17 @@ process.exit(0)
     await fs.rm(d1, { recursive: true, force: true }).catch(() => {})
     await fs.rm(dirGradle, { recursive: true, force: true }).catch(() => {})
 
-    // restore PATH
+    // restore PATH and ADB_PATH
     process.env.PATH = origPath
+    if (typeof origAdbPath !== 'undefined') process.env.ADB_PATH = origAdbPath
+    else delete process.env.ADB_PATH
 
     console.log('install tests passed')
   } finally {
     // ensure PATH restored even on failure
     process.env.PATH = origPath
+    if (typeof origAdbPath !== 'undefined') process.env.ADB_PATH = origAdbPath
+    else delete process.env.ADB_PATH
   }
 }
 

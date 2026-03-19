@@ -1,6 +1,6 @@
 {
   "name": "mobile-debug-mcp",
-  "version": "0.11.0",
+  "version": "0.12.0",
   "description": "MCP server for mobile app debugging (Android + iOS), with focus on security and reliability",
   "type": "module",
   "bin": {
@@ -10,9 +10,12 @@
     "build": "tsc",
     "start": "node ./dist/server.js",
     "prepare": "npm run build",
+    "healthcheck": "tsx ./scripts/check-idb.ts",
+    "install-idb": "tsx ./scripts/install-idb.ts",
     "test:unit": "tsx test/unit/index.ts",
-    "test:integration": "tsx test/integration/index.ts",
-    "test": "npm run test:unit && npm run test:integration",
+    "test:integration": "npm run build && tsx test/device/index.ts",
+    "test:device": "npm run build && tsx test/device/index.ts",
+    "test": "npm run test:unit",
     "lint": "eslint --ext .ts,.js src test --quiet",
     "lint:fix": "eslint --ext .ts,.js src test --fix"
   },
@@ -26,8 +29,8 @@
   },
   "devDependencies": {
     "@types/node": "^25.4.0",
-    "@typescript-eslint/eslint-plugin": "^8.57.0",
-    "@typescript-eslint/parser": "^8.57.0",
+    "@typescript-eslint/eslint-plugin": "^8.57.1",
+    "@typescript-eslint/parser": "^8.57.1",
     "eslint": "^9.39.4",
     "eslint-plugin-unused-imports": "^4.4.1",
     "tsx": "^4.21.0",

@@ -10,22 +10,30 @@ export interface StartAppResponse {
   device: DeviceInfo;
   appStarted: boolean;
   launchTimeMs: number;
+  error?: string;
+  diagnostics?: any;
 }
 
 export interface TerminateAppResponse {
   device: DeviceInfo;
   appTerminated: boolean;
+  error?: string;
+  diagnostics?: any;
 }
 
 export interface RestartAppResponse {
   device: DeviceInfo;
   appRestarted: boolean;
   launchTimeMs: number;
+  error?: string;
+  diagnostics?: any;
 }
 
 export interface ResetAppDataResponse {
   device: DeviceInfo;
   dataCleared: boolean;
+  error?: string;
+  diagnostics?: any;
 }
 
 export interface GetLogsResponse {
@@ -133,4 +141,5 @@ export interface InstallAppResponse {
   installed: boolean;
   output?: string;
   error?: string;
+  diagnostics?: any;
 }

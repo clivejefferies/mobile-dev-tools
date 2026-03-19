@@ -11,7 +11,8 @@ export default [
       '.git/',
       '.vscode/',
       'coverage/',
-      '.env'
+      '.env',
+      'scripts/'
     ]
   },
   // Apply rules to JS/TS source
@@ -40,6 +41,26 @@ export default [
   // Apply lighter rules to test files (no project reference to avoid TS project parsing)
   {
     files: ['test/**/*.ts', 'test/**/*.js'],
+    languageOptions: {
+      parser: tsParser,
+      parserOptions: {
+        ecmaVersion: 2020,
+        sourceType: 'module'
+      }
+    },
+    plugins: {
+      '@typescript-eslint': tsPlugin,
+      'unused-imports': unusedImports
+    },
+    rules: {
+      'unused-imports/no-unused-imports': 'error',
+      'unused-imports/no-unused-vars': ['error', { vars: 'all', args: 'after-used', ignoreRestSiblings: true }],
+      '@typescript-eslint/no-unused-vars': 'off'
+    }
+  },
+  // Apply rules to scripts and tooling (support TS syntax in scripts)
+  {
+    files: ['scripts/**/*.ts', 'scripts/**/*.js'],
     languageOptions: {
       parser: tsParser,
       parserOptions: {

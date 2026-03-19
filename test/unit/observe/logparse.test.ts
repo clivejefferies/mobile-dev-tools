@@ -1,4 +1,4 @@
-import { parseLogLine } from '../../src/android/utils.js'
+import { parseLogLine } from '../../../src/android/utils.js'
 
 function assert(cond: boolean, msg?: string) { if (!cond) throw new Error(msg || 'Assertion failed') }
 

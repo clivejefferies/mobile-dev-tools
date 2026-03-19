@@ -1,6 +1,6 @@
 import fs from 'fs/promises'
-import { listAndroidDevices } from '../../dist/android/utils.js'
-import { getAndroidLogs, captureAndroidScreen } from '../../dist/android.js'
+import { listAndroidDevices } from '../../../dist/android/utils.js'
+import { getAndroidLogs, captureAndroidScreen } from '../../../dist/android.js'
 
 async function main() {
   try {
@@ -32,7 +32,7 @@ async function main() {
     } else {
       console.log('No screenshot returned')
     }
-  } catch (err) {
+  } catch {
     console.error('Smoke test script failed:', err)
     process.exit(1)
   }

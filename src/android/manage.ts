@@ -3,6 +3,7 @@ import { spawn } from 'child_process'
 import path from 'path'
 import { existsSync } from 'fs'
 import { execAdb, spawnAdb, getAndroidDeviceMetadata, getDeviceInfo, findApk } from './utils.js'
+import { execAdbWithDiagnostics } from './diagnostics.js'
 import { detectJavaHome } from '../utils/java.js'
 import { InstallAppResponse, StartAppResponse, TerminateAppResponse, RestartAppResponse, ResetAppDataResponse } from '../types.js'
 
@@ -35,8 +36,8 @@ export class AndroidManage {
     const metadata = await getAndroidDeviceMetadata('', deviceId)
     const deviceInfo = getDeviceInfo(deviceId || 'default', metadata)
 
+    let apkToInstall: string = apkPath
     try {
-      let apkToInstall = apkPath
       const stat = await fs.stat(apkPath).catch(() => null)
       if (stat && stat.isDirectory()) {
         const detectedJavaHome = await detectJavaHome().catch(() => undefined)
@@ -98,22 +99,38 @@ export class AndroidManage {
       try { await execAdb(['shell', 'rm', remotePath], deviceId) } catch {}
       return { device: deviceInfo, installed: true, output: pmOut }
     } catch (e) {
-      return { device: deviceInfo, installed: false, error: e instanceof Error ? e.message : String(e) }
+      // gather diagnostics for attempted adb operations
+      const basename = path.basename(apkToInstall)
+      const remotePath = `/data/local/tmp/${basename}`
+      const installDiag = execAdbWithDiagnostics(['install', '-r', apkToInstall], deviceId)
+      const pushDiag = execAdbWithDiagnostics(['push', apkToInstall, remotePath], deviceId)
+      const pmDiag = execAdbWithDiagnostics(['shell', 'pm', 'install', '-r', remotePath], deviceId)
+      return { device: deviceInfo, installed: false, error: e instanceof Error ? e.message : String(e), diagnostics: { installDiag, pushDiag, pmDiag } }
     }
   }
 
   async startApp(appId: string, deviceId?: string): Promise<StartAppResponse> {
     const metadata = await getAndroidDeviceMetadata(appId, deviceId)
     const deviceInfo = getDeviceInfo(deviceId || 'default', metadata)
-    await execAdb(['shell', 'monkey', '-p', appId, '-c', 'android.intent.category.LAUNCHER', '1'], deviceId)
-    return { device: deviceInfo, appStarted: true, launchTimeMs: 1000 }
+    try {
+      await execAdb(['shell', 'monkey', '-p', appId, '-c', 'android.intent.category.LAUNCHER', '1'], deviceId)
+      return { device: deviceInfo, appStarted: true, launchTimeMs: 1000 }
+    } catch (e:any) {
+      const diag = execAdbWithDiagnostics(['shell', 'monkey', '-p', appId, '-c', 'android.intent.category.LAUNCHER', '1'], deviceId)
+      return { device: deviceInfo, appStarted: false, launchTimeMs: 0, error: e instanceof Error ? e.message : String(e), diagnostics: diag }
+    }
   }
 
   async terminateApp(appId: string, deviceId?: string): Promise<TerminateAppResponse> {
     const metadata = await getAndroidDeviceMetadata(appId, deviceId)
     const deviceInfo = getDeviceInfo(deviceId || 'default', metadata)
-    await execAdb(['shell', 'am', 'force-stop', appId], deviceId)
-    return { device: deviceInfo, appTerminated: true }
+    try {
+      await execAdb(['shell', 'am', 'force-stop', appId], deviceId)
+      return { device: deviceInfo, appTerminated: true }
+    } catch (e:any) {
+      const diag = execAdbWithDiagnostics(['shell', 'am', 'force-stop', appId], deviceId)
+      return { device: deviceInfo, appTerminated: false, error: e instanceof Error ? e.message : String(e), diagnostics: diag }
+    }
   }
 
   async restartApp(appId: string, deviceId?: string): Promise<RestartAppResponse> {
@@ -129,7 +146,12 @@ export class AndroidManage {
   async resetAppData(appId: string, deviceId?: string): Promise<ResetAppDataResponse> {
     const metadata = await getAndroidDeviceMetadata(appId, deviceId)
     const deviceInfo = getDeviceInfo(deviceId || 'default', metadata)
-    const output = await execAdb(['shell', 'pm', 'clear', appId], deviceId)
-    return { device: deviceInfo, dataCleared: output === 'Success' }
+    try {
+      const output = await execAdb(['shell', 'pm', 'clear', appId], deviceId)
+      return { device: deviceInfo, dataCleared: output === 'Success' }
+    } catch (e:any) {
+      const diag = execAdbWithDiagnostics(['shell', 'pm', 'clear', appId], deviceId)
+      return { device: deviceInfo, dataCleared: false, error: e instanceof Error ? e.message : String(e), diagnostics: diag }
+    }
   }
 }

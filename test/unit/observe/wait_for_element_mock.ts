@@ -1,5 +1,5 @@
-import { AndroidInteract } from "../../src/android/interact.js";
-import { AndroidObserve } from "../../src/android/observe.js";
+import { AndroidInteract } from '../../../src/android/interact.js';
+import { AndroidObserve } from '../../../src/android/observe.js';
 
 const originalGetUITree = (AndroidObserve as any).prototype.getUITree;
 

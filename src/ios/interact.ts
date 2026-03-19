@@ -1,6 +1,6 @@
 import { spawn } from "child_process"
 import { WaitForElementResponse, TapResponse } from "../types.js"
-import { getIOSDeviceMetadata, IDB } from "./utils.js"
+import { getIOSDeviceMetadata, getIdbCmd, isIDBInstalled } from "./utils.js"
 import { iOSObserve } from "./observe.js"
 
 export class iOSInteract {
@@ -39,12 +39,8 @@ export class iOSInteract {
   async tap(x: number, y: number, deviceId: string = "booted"): Promise<TapResponse> {
     const device = await getIOSDeviceMetadata(deviceId)
     
-    // Check for idb
-    const child = spawn(IDB, ['--version']);
-    const idbExists = await new Promise<boolean>((resolve) => {
-      child.on('error', () => resolve(false));
-      child.on('close', (code) => resolve(code === 0));
-    });
+    // Use shared helper to detect idb
+    const idbExists = await isIDBInstalled();
 
     if (!idbExists) {
         return {
@@ -64,7 +60,7 @@ export class iOSInteract {
       }
 
       await new Promise<void>((resolve, reject) => {
-        const proc = spawn(IDB, args);
+        const proc = spawn(getIdbCmd(), args);
         let stderr = '';
         proc.stderr.on('data', d => stderr += d.toString());
         proc.on('close', code => {

@@ -1,7 +1,7 @@
 import { spawn } from "child_process"
 import { promises as fs } from "fs"
 import { GetLogsResponse, CaptureIOSScreenshotResponse, GetUITreeResponse, UIElement, DeviceInfo } from "../types.js"
-import { execCommand, getIOSDeviceMetadata, validateBundleId, IDB, XCRUN } from "./utils.js"
+import { execCommand, getIOSDeviceMetadata, validateBundleId, getIdbCmd, getXcrunCmd, isIDBInstalled } from "./utils.js"
 import { createWriteStream, promises as fsPromises } from 'fs'
 import path from 'path'
 import { parseLogLine } from '../android/utils.js'
@@ -25,6 +25,17 @@ interface IDBElement {
 
 function parseIDBFrame(frame: any): [number, number, number, number] {
   if (!frame) return [0, 0, 0, 0];
+  // Handle string frames like "{{0, 0}, {402, 874}}"
+  if (typeof frame === 'string') {
+    const nums = frame.match(/-?\d+(?:\.\d+)?/g);
+    if (!nums || nums.length < 4) return [0, 0, 0, 0];
+    const x = Number(nums[0]);
+    const y = Number(nums[1]);
+    const w = Number(nums[2]);
+    const h = Number(nums[3]);
+    return [Math.round(x), Math.round(y), Math.round(x + w), Math.round(y + h)];
+  }
+
   const x = Number(frame.x || 0);
   const y = Number(frame.y || 0);
   const w = Number(frame.width || frame.w || 0);
@@ -102,15 +113,7 @@ function traverseIDBNode(node: IDBElement, elements: UIElement[], parentIndex: n
   return currentIndex;
 }
 
-// Check if IDB is installed
-async function isIDBInstalled(): Promise<boolean> {
-  return new Promise((resolve) => {
-    // Check if 'idb' is in path by trying to run it
-    const child = spawn(IDB, ['--version']);
-    child.on('error', () => resolve(false));
-    child.on('close', (code) => resolve(code === 0));
-  });
-}
+
 
 // iOS live log stream support (moved from ios/utils to observe)
 const iosActiveLogStreams: Map<string, { proc: ReturnType<typeof import('child_process').spawn>, file: string }> = new Map()
@@ -207,13 +210,13 @@ export class iOSObserve {
          // Stabilization delay
          await delay(300 + (attempts * 100));
 
-         const args = ['ui', 'describe', '--json'];
+         const args = ['ui', 'describe-all', '--json'];
          if (targetUdid) {
             args.push('--udid', targetUdid);
          }
 
          const output = await new Promise<string>((resolve, reject) => {
-             const child = spawn(IDB, args);
+             const child = spawn(getIdbCmd(), args);
              let stdout = '';
              let stderr = '';
 
@@ -252,9 +255,14 @@ export class iOSObserve {
 
     try {
         const elements: UIElement[] = [];
-        const root = jsonContent;
-        
-        traverseIDBNode(root, elements);
+        // idb describe-all returns either a root object or an array of root nodes
+        if (Array.isArray(jsonContent)) {
+          for (const node of jsonContent) {
+            traverseIDBNode(node, elements);
+          }
+        } else {
+          traverseIDBNode(jsonContent, elements);
+        }
 
         // Infer resolution from root element if possible (usually the Window/Application frame)
         let width = 0;
@@ -293,7 +301,7 @@ export class iOSObserve {
       }
 
       const args = ['simctl', 'spawn', deviceId, 'log', 'stream', '--style', 'syslog', '--predicate', predicate]
-      const proc = spawn(XCRUN, args)
+      const proc = spawn(getXcrunCmd(), args)
 
       // Prepare output file
       const tmpDir = process.env.TMPDIR || '/tmp'
