@@ -2,7 +2,7 @@
 
 A minimal, secure MCP server for AI-assisted mobile development. Build, install, and inspect Android/iOS apps from an MCP-compatible client.
 
-> **Note:** iOS support is currently an untested Work In Progress (WIP). Please use with caution and report any issues.
+> **Note:** iOS support is currently only tested on simulator. Please use with caution and report any issues.
 
 ## Requirements
 
