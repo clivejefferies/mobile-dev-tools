@@ -2,6 +2,9 @@
 
 All notable changes to the **Mobile Debug MCP** project will be documented in this file.
 
+## [0.12.4]
+- Made projectType and platform mandatory
+
 ## [0.12.3]
 - Now supports native and cross platform development platforms for building
 - Add MCP_DISABLE_AUTODETECT env var to require explicit platform/projectType for deterministic agent runs. When set to 1, build/install handlers will fail if platform is not provided.

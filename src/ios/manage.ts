@@ -5,11 +5,15 @@ import { execCommand, execCommandWithDiagnostics, getIOSDeviceMetadata, validate
 import path from "path"
 
 export class iOSManage {
-  async build(projectPath: string, _variant?: string): Promise<{ artifactPath: string, output?: string } | { error: string, diagnostics?: any }> {
-    void _variant
+  async build(projectPath: string, optsOrVariant?: string | { workspace?: string, project?: string, scheme?: string, destinationUDID?: string, derivedDataPath?: string, forceClean?: boolean, xcodeCmd?: string }): Promise<{ artifactPath: string, output?: string } | { error: string, diagnostics?: any }> {
+    // Support legacy variant string as second arg
+    let opts: any = {}
+    if (typeof optsOrVariant === 'string') opts.variant = optsOrVariant
+    else opts = optsOrVariant || {}
+
     try {
       // Look for an Xcode workspace or project at the provided path. If not present, scan subdirectories (limited depth)
-      async function findProject(root: string, maxDepth = 3): Promise<{ dir: string, workspace?: string, proj?: string } | null> {
+      async function findProject(root: string, maxDepth = 4): Promise<{ dir: string, workspace?: string, proj?: string } | null> {
         try {
           const ents = await fs.readdir(root, { withFileTypes: true }).catch(() => [])
           for (const e of ents) {
@@ -36,14 +40,31 @@ export class iOSManage {
 
       // Resolve projectPath to an absolute path to avoid cwd-relative resolution issues
       const absProjectPath = path.resolve(projectPath)
-      const projectInfo = await findProject(absProjectPath, 3)
-      if (!projectInfo) return { error: 'No Xcode project or workspace found' }
-      const projectRootDir = projectInfo.dir || absProjectPath
-      const workspace = projectInfo.workspace
-      const proj = projectInfo.proj
 
-      // Determine destination: prefer explicit env var, otherwise use booted simulator UDID
-      let destinationUDID = process.env.MCP_XCODE_DESTINATION_UDID || process.env.MCP_XCODE_DESTINATION || ''
+      // If caller supplied explicit workspace/project, prefer those and set projectRootDir accordingly
+      let projectRootDir = absProjectPath
+      let workspace: string | undefined = opts.workspace
+      let proj: string | undefined = opts.project
+
+      if (workspace) {
+        // normalize workspace path and set root to its parent
+        workspace = path.isAbsolute(workspace) ? workspace : path.join(absProjectPath, workspace)
+        projectRootDir = path.dirname(workspace)
+        workspace = path.basename(workspace)
+      } else if (proj) {
+        proj = path.isAbsolute(proj) ? proj : path.join(absProjectPath, proj)
+        projectRootDir = path.dirname(proj)
+        proj = path.basename(proj)
+      } else {
+        const projectInfo = await findProject(absProjectPath, 4)
+        if (!projectInfo) return { error: 'No Xcode project or workspace found' }
+        projectRootDir = projectInfo.dir || absProjectPath
+        workspace = projectInfo.workspace
+        proj = projectInfo.proj
+      }
+
+      // Determine destination: prefer explicit option, then env var, otherwise use booted simulator UDID
+      let destinationUDID = opts.destinationUDID || process.env.MCP_XCODE_DESTINATION_UDID || process.env.MCP_XCODE_DESTINATION || ''
       if (!destinationUDID) {
         try {
           const meta = await getIOSDeviceMetadata('booted')
@@ -52,7 +73,7 @@ export class iOSManage {
       }
 
       // Determine xcode command early so it can be used when detecting schemes
-      const xcodeCmd = process.env.XCODEBUILD_PATH || 'xcodebuild'
+      const xcodeCmd = opts.xcodeCmd || process.env.XCODEBUILD_PATH || 'xcodebuild'
 
       // Determine available schemes by querying xcodebuild -list rather than guessing
       async function detectScheme(xcodeCmdInner: string, workspacePath?: string, projectPathFull?: string, cwd?: string): Promise<string | null> {
@@ -73,31 +94,34 @@ export class iOSManage {
 
       // Prepare build flags and paths (support incremental builds)
       let buildArgs: string[]
-      let chosenScheme: string | null = null
+      let chosenScheme: string | null = opts.scheme || null
 
       // Derived data and result bundle (agent-configurable)
-      const derivedDataPath = process.env.MCP_DERIVED_DATA || path.join(projectRootDir, 'build', 'DerivedData')
-      const resultBundlePath = path.join(projectRootDir, 'build', 'xcresults', 'ResultBundle.xcresult')
+      const derivedDataPath = opts.derivedDataPath || process.env.MCP_DERIVED_DATA || path.join(projectRootDir, 'build', 'DerivedData')
+      // Use unique result bundle path by default to avoid collisions
+      const resultBundlePath = process.env.MCP_XCODE_RESULTBUNDLE_PATH || path.join(projectRootDir, 'build', 'xcresults', `ResultBundle-${Date.now()}-${Math.random().toString(36).slice(2)}.xcresult`)
       const xcodeJobs = parseInt(process.env.MCP_XCODE_JOBS || '', 10) || 4
-      const forceClean = process.env.MCP_FORCE_CLEAN === '1'
+      const forceClean = opts.forceClean || process.env.MCP_FORCE_CLEAN === '1'
 
       // ensure result dirs exist
       await fs.mkdir(path.dirname(resultBundlePath), { recursive: true }).catch(() => {})
       await fs.mkdir(derivedDataPath, { recursive: true }).catch(() => {})
+      // remove any pre-existing result bundle path to avoid xcodebuild complaining
+      await fs.rm(resultBundlePath, { recursive: true, force: true }).catch(() => {})
 
       if (workspace) {
         const workspacePath = path.join(projectRootDir, workspace)
-        chosenScheme = await detectScheme(xcodeCmd, workspacePath, undefined, projectRootDir)
+        if (!chosenScheme) chosenScheme = await detectScheme(xcodeCmd, workspacePath, undefined, projectRootDir)
         const scheme = chosenScheme || workspace.replace(/\.xcworkspace$/, '')
         buildArgs = ['-workspace', workspacePath, '-scheme', scheme, '-configuration', 'Debug', '-sdk', 'iphonesimulator', 'build']
       } else {
         const projectPathFull = path.join(projectRootDir, proj!)
-        chosenScheme = await detectScheme(xcodeCmd, undefined, projectPathFull, projectRootDir)
+        if (!chosenScheme) chosenScheme = await detectScheme(xcodeCmd, undefined, projectPathFull, projectRootDir)
         const scheme = chosenScheme || proj!.replace(/\.xcodeproj$/, '')
         buildArgs = ['-project', projectPathFull, '-scheme', scheme, '-configuration', 'Debug', '-sdk', 'iphonesimulator', 'build']
       }
 
-      // Insert clean if explicitly requested via env
+      // Insert clean if explicitly requested via env or opts
       if (forceClean) {
         const idx = buildArgs.indexOf('build')
         if (idx >= 0) buildArgs.splice(idx, 0, 'clean')

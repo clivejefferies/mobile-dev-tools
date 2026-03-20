@@ -134,30 +134,30 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     },
     {
       name: "install_app",
-      description: "Install an app on Android or iOS. Accepts a built binary (apk/.ipa/.app) or a project directory to build then install.",
+      description: "Install an app on Android or iOS. Accepts a built binary (apk/.ipa/.app) or a project directory to build then install. platform and projectType are required.",
       inputSchema: {
         type: "object",
         properties: {
-          platform: { type: "string", enum: ["android", "ios"], description: "Optional. If omitted the server will attempt to detect platform from appPath/project files." },
-          projectType: { type: "string", enum: ["native","kmp","react-native","flutter"], description: "Optional project type to guide build tool selection (e.g., kmp, react-native)." },
+          platform: { type: "string", enum: ["android", "ios"], description: "Platform to install to (required)." },
+          projectType: { type: "string", enum: ["native","kmp","react-native","flutter"], description: "Project type to guide build/install tool selection (required)." },
           appPath: { type: "string", description: "Path to APK, .app, .ipa, or project directory" },
           deviceId: { type: "string", description: "Device UDID (iOS) or Serial (Android). Defaults to booted/connected." }
         },
-        required: ["appPath"]
+        required: ["platform", "projectType", "appPath"]
       }
     },
     {
       name: "build_app",
-      description: "Build a project for Android or iOS and return the built artifact path. Does not install.",
+      description: "Build a project for Android or iOS and return the built artifact path. Does not install. platform and projectType are required.",
       inputSchema: {
         type: "object",
         properties: {
-          platform: { type: "string", enum: ["android", "ios"], description: "Optional. If omitted the server will attempt to detect platform from projectPath files." },
-          projectType: { type: "string", enum: ["native","kmp","react-native","flutter"], description: "Optional project type to guide build tool selection (e.g., kmp, react-native)." },
+          platform: { type: "string", enum: ["android", "ios"], description: "Platform to build for (required)." },
+          projectType: { type: "string", enum: ["native","kmp","react-native","flutter"], description: "Project type to guide build tool selection (required)." },
           projectPath: { type: "string", description: "Path to project directory (contains gradlew or xcodeproj/xcworkspace)" },
           variant: { type: "string", description: "Optional build variant (e.g., Debug/Release)" }
         },
-        required: ["projectPath"]
+        required: ["platform", "projectType", "projectPath"]
       }
     },
 

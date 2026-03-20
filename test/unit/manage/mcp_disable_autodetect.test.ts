@@ -18,10 +18,11 @@ export async function run() {
     const { ToolsManage } = await import('../../../src/tools/manage.js')
 
     try {
+      // platform and projectType are now mandatory; calling without them should return a missing-params error
       const res = await ToolsManage.buildAndInstallHandler({ projectPath: both })
       console.log('result:', res.result)
       assert.strictEqual(res.result.success, false)
-      assert.ok(String(res.result.error).includes('MCP_DISABLE_AUTODETECT'), 'Expected error to mention MCP_DISABLE_AUTODETECT')
+      assert.ok(String(res.result.error).includes('Both platform and projectType parameters are required'), 'Expected missing-params error')
       console.log('mcp_disable_autodetect test passed')
     } finally {
       if (orig === undefined) delete process.env.MCP_DISABLE_AUTODETECT
