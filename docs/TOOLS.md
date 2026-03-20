@@ -1,8 +1,24 @@
 # Tools
 
-This document contains detailed definitions for each MCP tool implemented by Mobile Debug MCP. These were extracted from the README to keep the top-level README concise.
+This document contains detailed definitions for each MCP tool implemented by Mobile Debug MCP. Examples use valid JSON in fenced code blocks to avoid highlighting issues.
 
-Each tool returns a JSON metadata block and, where applicable, additional content blocks (e.g., image data or raw logs). Where an example previously used `jsonc` fences with inline comments, the examples below use `json` fences and external explanatory notes to avoid highlighting issues.
+---
+
+## Summary of build/install handlers
+
+- buildApp / build_android / build_ios: platform-specific build handlers that run Gradle or xcodebuild and return an artifact path.
+- buildAndInstallHandler: orchestrates build → install → validate and emits NDJSON events for progress.
+- build_flutter / build_react_native: best-effort handlers that prefer framework CLIs (flutter) or delegate to native subprojects for React Native.
+
+Environment variables you may need:
+- ADB_PATH: explicit path to adb binary (recommended for non-interactive shells)
+- XCRUN_PATH / IDB_PATH: explicit xcrun/idb path overrides
+- FLUTTER_PATH: explicit flutter CLI path (optional)
+- MCP_GRADLE_WORKERS / MCP_BUILD_JOBS: number of Gradle/Xcode workers
+- MCP_GRADLE_CACHE: set to "0" to disable Gradle build cache
+- MCP_DERIVED_DATA: path for Xcode -derivedDataPath (improves incremental iOS builds)
+- MCP_FORCE_CLEAN / MCP_FORCE_CLEAN_ANDROID / MCP_FORCE_CLEAN_IOS: control clean behavior
+- MCP_DISABLE_AUTODETECT: set to "1" to disable project auto-detection (require explicit platform or projectType)
 
 ---
 
@@ -10,263 +26,297 @@ Each tool returns a JSON metadata block and, where applicable, additional conten
 Enumerate connected Android devices and iOS simulators.
 
 Input (optional):
-```json
-{ "platform": "android" | "ios" }
+
+```
+{ "platform": "android" }
 ```
 
 Response:
-```json
+
+```
 { "devices": [ { "id": "emulator-5554", "platform": "android", "osVersion": "11", "model": "sdk_gphone64_arm64", "simulator": true, "appInstalled": false } ] }
 ```
 
 Notes:
-- Use `list_devices` to inspect connected targets and their metadata. When multiple devices are attached, pass `deviceId` to other tools to target a specific device.
+- When multiple devices are attached, pass `deviceId` to other tools to target a specific device.
+
+---
+
+## build_app / build_android / build_ios
+Build a project and return the path to the generated artifact (APK or .app/.ipa).
+
+Input (examples):
+
+Android:
+
+```
+{ "projectPath": "/path/to/project", "gradleTask": "assembleDebug", "maxWorkers": 4 }
+```
+
+iOS:
+
+```
+{ "projectPath": "/path/to/project", "scheme": "AppScheme", "derivedDataPath": "/tmp/derived", "buildJobs": 4 }
+```
+
+Response:
+
+```
+{ "artifactPath": "/path/to/build/output/app.apk" }
+```
+
+Notes:
+- Android: honors `MCP_GRADLE_WORKERS` / `MCP_GRADLE_CACHE`; will prefer project gradlew when present.
+- iOS: honors `MCP_DERIVED_DATA`, `MCP_BUILD_JOBS` and `MCP_XCODE_DESTINATION_UDID`.
+
+---
+
+## build_flutter
+Best-effort Flutter build. Prefers `flutter` CLI when available, otherwise delegates to native subprojects.
+
+Input:
+
+```
+{ "projectPath": "/path/to/flutter", "platform": "android", "buildMode": "debug" }
+```
+
+Response:
+
+```
+{ "artifactPath": "/path/to/build/output/app.apk" }
+```
+
+Notes:
+- iOS builds may require codesigning and CocoaPods. The handler uses `--no-codesign` where appropriate but CI must provide signing artifacts if needed.
+
+---
+
+## build_react_native
+Delegates to native subproject builders (android/ios). Does not run `pod install`; pre-install pods in CI for deterministic builds.
+
+Input:
+
+```
+{ "projectPath": "/path/to/react-native", "platform": "android" }
+```
+
+Response:
+
+```
+{ "artifactPath": "/path/to/android/app/build/outputs/apk/debug/app-debug.apk" }
+```
+
+---
+
+## build_and_install (buildAndInstallHandler)
+Orchestrates build then install and returns streamed NDJSON events and a final result object.
+
+Input:
+
+```
+{ "projectPath": "/path/to/project", "platform": "android", "deviceId": "emulator-5554", "projectType": "kmp" }
+```
+
+NDJSON events (example stream):
+
+```
+{"type":"build","status":"started","platform":"android"}
+{"type":"build","status":"finished","artifactPath":"/path/to/app.apk"}
+{"type":"install","status":"started","artifactPath":"/path/to/app.apk","deviceId":"emulator-5554"}
+{"type":"install","status":"finished","artifactPath":"/path/to/app.apk","device":{"platform":"android","id":"emulator-5554"}}
+```
+
+Final result:
+
+```
+{ "success": true, "artifactPath": "/path/to/app.apk", "device": { "platform": "android", "id": "emulator-5554" }, "output": "Performing Streamed Install\nSuccess" }
+```
+
+Notes:
+- If `projectType` === `kmp`, the handler prefers Android by default. Set `platform` explicitly to override.
+- If `MCP_DISABLE_AUTODETECT=1`, callers MUST provide `platform` or `projectType`.
 
 ---
 
 ## install_app
-Install an app onto a connected device or simulator (APK for Android, .app/.ipa for iOS).
+Install an app onto a connected device or simulator.
 
 Input:
-```json
-{
-  "platform": "android" | "ios",
-  "appPath": "/path/to/app.apk_or_app.app_or_ipa",
-  "deviceId": "emulator-5554"
-}
+
+```
+{ "platform": "android", "appPath": "/path/to/app.apk", "deviceId": "emulator-5554" }
 ```
 
 Response:
-```json
-{
-  "device": { /* device info */ },
-  "installed": true,
-  "output": "Platform-specific installer output (adb/simctl/idb)",
-  "error": "Optional error message if installation failed"
-}
+
+```
+{ "device": { "platform": "android", "id": "emulator-5554" }, "installed": true, "output": "Performing Streamed Install\nSuccess" }
 ```
 
 Notes:
-- Android: the tool attempts to locate and install the APK. If `appPath` points at a project directory, the tool will attempt to run the Gradle wrapper (`./gradlew assembleDebug`) and locate the built APK under `build/outputs/apk/`.
-- The installer respects `ADB_PATH` (preferred) falling back to `adb` on PATH. To avoid PATH discovery issues, set `ADB_PATH` to the full adb binary path.
-- The default ADB command timeout was increased to 120s to handle larger streamed installs. Configure via `MCP_ADB_TIMEOUT` or `ADB_TIMEOUT` env vars.
-- iOS: prefers `xcrun simctl install` for simulators and falls back to `idb install` for devices when available.
+- Android: prefers `ADB_PATH` if set, otherwise falls back to `adb` on PATH.
+- iOS: uses `xcrun simctl install` for simulators and `idb` where available for devices.
 
 ---
 
-## start_app
-Launch a mobile app.
+## start_app / terminate_app / restart_app / reset_app_data
+Standard app lifecycle operations.
 
-Input:
-```json
-{
-  "platform": "android" | "ios",
-  "appId": "com.example.app",
-  "deviceId": "emulator-5554"
-}
+start_app input:
+
+```
+{ "platform": "android", "appId": "com.example.app", "deviceId": "emulator-5554" }
 ```
 
-Response:
-```json
-{
-  "device": { /* device info */ },
-  "appStarted": true,
-  "launchTimeMs": 123
-}
+start_app response:
+
+```
+{ "device": { "platform": "android", "id": "emulator-5554" }, "appStarted": true, "launchTimeMs": 142 }
 ```
 
-Notes:
-- Android: uses `adb shell monkey -p <package> -c android.intent.category.LAUNCHER 1` to trigger a launch.
-- iOS: uses `xcrun simctl launch` for simulators or `idb` for devices when available.
+terminate_app response:
+
+```
+{ "device": { "platform": "android", "id": "emulator-5554" }, "appTerminated": true }
+```
+
+reset_app_data response:
+
+```
+{ "device": { "platform": "android", "id": "emulator-5554" }, "dataCleared": true }
+```
 
 ---
 
 ## get_logs
-Fetch recent logs from the app or device.
+Fetch recent logs. For Android returns metadata + raw log block.
 
 Input:
-```json
-{
-  "platform": "android" | "ios",
-  "appId": "com.example.app",
-  "deviceId": "emulator-5554",
-  "lines": 200
-}
+
+```
+{ "platform": "android", "appId": "com.example.app", "deviceId": "emulator-5554", "lines": 200 }
 ```
 
-Response:
-- The tool returns two content blocks for Android: a JSON metadata block and a plain text log output block. The JSON metadata includes parsed results (counts, crash summaries) and the raw log is provided for inspection.
+Response (metadata):
 
-Notes:
-- Android log parsing is heuristic and includes basic crash detection (searching for "FATAL EXCEPTION" and exception names).
-- Use `lines` to control how many log lines are returned from `adb logcat`.
+```
+{ "entries": 200, "crash_summary": { "crash_detected": false } }
+```
+
+Followed by raw log plain text block.
 
 ---
 
 ## capture_screenshot
-Capture a screenshot of the current device screen.
+Capture screen. Returns JSON metadata then an image/png block with base64 PNG data.
 
 Input:
-```json
-{
-  "platform": "android" | "ios",
-  "deviceId": "emulator-5554"
-}
+
+```
+{ "platform": "android", "deviceId": "emulator-5554" }
 ```
 
-Response:
-- JSON metadata block with resolution and device info, followed by an image/png block containing base64-encoded PNG bytes.
+Response (metadata):
 
-Notes:
-- Android: uses `adb exec-out screencap -p` and returns PNG bytes.
-- iOS: uses `xcrun simctl io booted screenshot` or `idb` capture when available.
-
----
-
-## terminate_app
-Terminate a running app.
-
-Input:
-```json
-{
-  "platform": "android" | "ios",
-  "appId": "com.example.app",
-  "deviceId": "emulator-5554"
-}
 ```
-
-Response:
-```json
-{ "device": { /* device info */ }, "appTerminated": true }
+{ "device": { "platform": "android", "id": "emulator-5554" }, "width": 1080, "height": 2400 }
 ```
-
-Notes:
-- Android: uses `adb shell am force-stop <package>`.
-
----
-
-## restart_app
-Restart an app (terminate then launch).
-
-Input/Response: combination of terminate + start as above. Response includes launch timing metadata.
-
----
-
-## reset_app_data
-Clear app storage (reset to fresh install state).
-
-Input:
-```json
-{
-  "platform": "android" | "ios",
-  "appId": "com.example.app",
-  "deviceId": "emulator-5554"
-}
-```
-
-Response:
-```json
-{ "device": { /* device info */ }, "dataCleared": true }
-```
-
-Notes:
-- Android: uses `adb shell pm clear <package>` and returns whether the operation succeeded.
-
----
-
-## start_log_stream / read_log_stream / stop_log_stream
-Start a live log stream (background) for an Android app and poll the accumulated entries.
-
-- start_log_stream starts a background `adb logcat` filtered by the app PID and writes parsed NDJSON to a per-session file. Returns immediately with session details.
-- read_log_stream retrieves recent parsed entries and includes crash detection metadata.
-- stop_log_stream terminates the background process and closes the stream.
-
-Input (start_log_stream):
-```json
-{ "packageName": "com.example.app", "level": "error" | "warn" | "info" | "debug", "sessionId": "optional-session-id" }
-```
-
-Response (read_log_stream):
-```json
-{ "entries": [ /* parsed entries */ ], "crash_summary": { "crash_detected": true/false, "exception": "..." } }
-```
-
-Notes:
-- The `since` parameter for read_log_stream accepts ISO timestamps or epoch ms. Use it for incremental polling.
-- Crash detection is heuristic-based and intended as a quick signal for agents.
 
 ---
 
 ## get_ui_tree
-Get the current UI hierarchy from the device.
+Returns parsed UI hierarchy.
 
 Input:
-```json
-{ "platform": "android" | "ios", "deviceId": "emulator-5554" }
+
+```
+{ "platform": "android", "deviceId": "emulator-5554" }
 ```
 
-Response:
-- Structured JSON containing screen metadata and an array of UI elements with properties: text, contentDescription, type, resourceId, clickable, enabled, visible, bounds, center, depth, parentId, children.
+Response (example):
 
-Notes:
-- Android: uses `uiautomator dump` or `adb exec-out uiautomator` fallback methods. Times out on slow responses; use provided timeouts.
-- iOS: uses `idb` or accessibility APIs when available.
+```
+{ "device": { "platform": "android", "id": "emulator-5554" }, "elements": [ { "text": "Sign in", "type": "android.widget.Button", "resourceId": "com.example:id/signin", "clickable": true, "bounds": [0,0,100,50] } ] }
+```
 
 ---
 
 ## get_current_screen
-Get the currently visible activity on Android.
+Get visible Android activity.
 
 Input:
-```json
+
+```
 { "deviceId": "emulator-5554" }
 ```
 
 Response:
-```json
-{ "device": { /* device info */ }, "package": "com.example.app", "activity": "com.example.app.LoginActivity", "shortActivity": "LoginActivity" }
-```
 
-Notes:
-- Uses `dumpsys activity activities` and robust parsing to support multiple Android versions.
+```
+{ "device": { "platform": "android", "id": "emulator-5554" }, "package": "com.example.app", "activity": "com.example.app.MainActivity", "shortActivity": "MainActivity" }
+```
 
 ---
 
 ## wait_for_element
-Wait until a UI element with matching text appears on screen or timeout is reached.
+Wait for UI element.
 
 Input:
-```json
-{ "platform": "android" | "ios", "text": "Home", "timeout": 5000, "deviceId": "emulator-5554" }
+
+```
+{ "platform": "android", "text": "Home", "timeout": 5000, "deviceId": "emulator-5554" }
 ```
 
 Response:
-```json
-{ "device": { /* device info */ }, "found": true/false, "element": { /* element */ } }
-```
 
-Notes:
-- Polls get_ui_tree until timeout or element found. Returns an `error` field if system failures occur.
+```
+{ "device": { "platform": "android", "id": "emulator-5554" }, "found": true, "element": { "text": "Home", "resourceId": "com.example:id/home" } }
+```
 
 ---
 
 ## tap / swipe / type_text / press_back
 
-- tap: `adb shell input tap x y` (Android) or `idb` events for iOS.
-- swipe: `adb shell input swipe x1 y1 x2 y2 duration`.
-- type_text: `adb shell input text` (spaces encoded as %s) — may fail for special characters.
-- press_back: `adb shell input keyevent 4`.
+Examples:
 
-Inputs and responses follow the device+success pattern used across other tools.
+Tap input:
+
+```
+{ "platform": "android", "deviceId": "emulator-5554", "x": 100, "y": 200 }
+```
+
+Response:
+
+```
+{ "device": { "platform": "android", "id": "emulator-5554" }, "success": true }
+```
 
 ---
 
-## Notes on environment and timeout behavior
+## start_log_stream / read_log_stream / stop_log_stream
+Start a background adb logcat stream and retrieve parsed NDJSON entries.
 
-- The tools prefer explicit env vars: `ADB_PATH` and `XCRUN_PATH` to locate platform binaries. If unset, tools fall back to PATH lookup.
-- For Android builds, the install tool auto-detects a suitable Java 17 installation (Android Studio JBR or system JDK 17). Any JAVA_HOME overrides are scoped to the spawned Gradle process.
-- Default ADB timeout is now 120s for long operations; override via `MCP_ADB_TIMEOUT` or `ADB_TIMEOUT`.
+start_log_stream input:
+
+```
+{ "packageName": "com.example.app", "level": "error", "sessionId": "optional" }
+```
+
+read_log_stream response:
+
+```
+{ "entries": [ { "timestamp": "2026-03-20T...Z", "level": "E", "tag": "AppTag", "message": "FATAL EXCEPTION" } ], "crash_summary": { "crash_detected": true } }
+```
 
 ---
 
-If you need the tools split into per-tool markdown files (e.g., docs/tools/install.md), say so and I will split them.
+## Notes on environment and timeouts
+
+- Prefer explicit env vars: `ADB_PATH`, `XCRUN_PATH`, `IDB_PATH`, `FLUTTER_PATH` for deterministic agent runs.
+- Use `MCP_DERIVED_DATA` to reuse DerivedData for fast incremental iOS builds.
+- For CI/agents, set `MCP_DISABLE_AUTODETECT=1` and provide `platform` or `projectType` to avoid ambiguous behavior.
+- Default ADB timeout is 120s; override via `MCP_ADB_TIMEOUT` or `ADB_TIMEOUT`.
+
+---
+
+If you want per-tool split files, I can split this document into smaller files under docs/tools/.
