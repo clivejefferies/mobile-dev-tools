@@ -1,6 +1,6 @@
-import { DeviceInfo } from "./types.js"
-import { listAndroidDevices } from "./android/utils.js"
-import { listIOSDevices } from "./ios/utils.js"
+import { DeviceInfo } from "../types.js"
+import { listAndroidDevices } from "../android/utils.js"
+import { listIOSDevices } from "../ios/utils.js"
 
 export interface ResolveOptions {
   platform: "android" | "ios"
@@ -11,7 +11,6 @@ export interface ResolveOptions {
 
 function parseNumericVersion(v: string): number {
   if (!v) return 0
-  // extract first number groups like 17.0 -> 17.0 or Android 12 -> 12
   const m = v.match(/(\d+)(?:[\.\-](\d+))?/) 
   if (!m) return 0
   const major = parseInt(m[1], 10) || 0
@@ -23,7 +22,6 @@ export async function listDevices(platform?: "android" | "ios", appId?: string):
   if (!platform || platform === "android") {
     const android = await listAndroidDevices(appId)
     if (platform === "android") return android
-    // if no platform specified, merge with ios below
     const ios = await listIOSDevices(appId)
     return [...android, ...ios]
   }
@@ -42,11 +40,9 @@ export async function resolveTargetDevice(opts: ResolveOptions): Promise<DeviceI
 
   let candidates = devices.slice()
 
-  // Apply prefer filter
   if (prefer === "physical") candidates = candidates.filter(d => !d.simulator)
   if (prefer === "emulator") candidates = candidates.filter(d => d.simulator)
 
-  // If appId provided, prefer devices with appInstalled
   if (appId) {
     const installed = candidates.filter(d => (d as any).appInstalled)
     if (installed.length > 0) candidates = installed
@@ -55,21 +51,17 @@ export async function resolveTargetDevice(opts: ResolveOptions): Promise<DeviceI
   if (candidates.length === 1) return candidates[0]
 
   if (candidates.length > 1) {
-    // Prefer physical over emulator unless prefer=emulator
     if (!prefer) {
       const physical = candidates.filter(d => !d.simulator)
       if (physical.length === 1) return physical[0]
       if (physical.length > 1) candidates = physical
     }
 
-    // Pick highest OS version
     candidates.sort((a, b) => parseNumericVersion(b.osVersion) - parseNumericVersion(a.osVersion))
-    // If top is unique (numeric differs), return it
     if (candidates.length > 1 && parseNumericVersion(candidates[0].osVersion) > parseNumericVersion(candidates[1].osVersion)) {
       return candidates[0]
     }
 
-    // Ambiguous: throw an error with candidate list so caller (agent) can present choices
     const list = candidates.map(d => ({ id: d.id, platform: d.platform, osVersion: d.osVersion, model: d.model, simulator: d.simulator, appInstalled: (d as any).appInstalled }))
     const err = new Error(`Multiple matching devices found: ${JSON.stringify(list, null, 2)}`)
     ;(err as any).devices = list

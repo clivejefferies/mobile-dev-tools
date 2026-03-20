@@ -1,6 +1,6 @@
 import { promises as fs } from 'fs'
 import path from 'path'
-import { resolveTargetDevice, listDevices } from '../resolve-device.js'
+import { resolveTargetDevice, listDevices } from '../utils/resolve-device.js'
 import { AndroidManage } from '../android/manage.js'
 import { iOSManage } from '../ios/manage.js'
 import type { InstallAppResponse, StartAppResponse, TerminateAppResponse, RestartAppResponse, ResetAppDataResponse } from '../types.js'

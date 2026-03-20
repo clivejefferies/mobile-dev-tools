@@ -3,7 +3,7 @@ import { spawn } from 'child_process'
 import path from 'path'
 import { existsSync } from 'fs'
 import { execAdb, spawnAdb, getAndroidDeviceMetadata, getDeviceInfo, findApk } from './utils.js'
-import { execAdbWithDiagnostics } from './diagnostics.js'
+import { execAdbWithDiagnostics } from '../utils/diagnostics.js'
 import { detectJavaHome } from '../utils/java.js'
 import { InstallAppResponse, StartAppResponse, TerminateAppResponse, RestartAppResponse, ResetAppDataResponse } from '../types.js'
 

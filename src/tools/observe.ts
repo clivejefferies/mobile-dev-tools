@@ -1,4 +1,4 @@
-import { resolveTargetDevice } from '../resolve-device.js'
+import { resolveTargetDevice } from '../utils/resolve-device.js'
 import { AndroidObserve } from '../android/observe.js'
 import { iOSObserve } from '../ios/observe.js'
 

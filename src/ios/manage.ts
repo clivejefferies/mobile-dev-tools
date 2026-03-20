@@ -1,11 +1,11 @@
 import { promises as fs } from "fs"
-import { spawn } from "child_process"
+import { spawn, spawnSync } from "child_process"
 import { StartAppResponse, TerminateAppResponse, RestartAppResponse, ResetAppDataResponse, InstallAppResponse } from "../types.js"
 import { execCommand, execCommandWithDiagnostics, getIOSDeviceMetadata, validateBundleId, getIdbCmd, findAppBundle } from "./utils.js"
 import path from "path"
 
 export class iOSManage {
-  async build(projectPath: string, _variant?: string): Promise<{ artifactPath: string, output?: string } | { error: string }> {
+  async build(projectPath: string, _variant?: string): Promise<{ artifactPath: string, output?: string } | { error: string, diagnostics?: any }> {
     void _variant
     try {
       // Look for an Xcode workspace or project at the provided path. If not present, scan subdirectories (limited depth)
@@ -34,9 +34,11 @@ export class iOSManage {
         return null
       }
 
-      const projectInfo = await findProject(projectPath, 3)
+      // Resolve projectPath to an absolute path to avoid cwd-relative resolution issues
+      const absProjectPath = path.resolve(projectPath)
+      const projectInfo = await findProject(absProjectPath, 3)
       if (!projectInfo) return { error: 'No Xcode project or workspace found' }
-      const projectRootDir = projectInfo.dir || projectPath
+      const projectRootDir = projectInfo.dir || absProjectPath
       const workspace = projectInfo.workspace
       const proj = projectInfo.proj
 
@@ -49,14 +51,37 @@ export class iOSManage {
         } catch {}
       }
 
+      // Determine xcode command early so it can be used when detecting schemes
+      const xcodeCmd = process.env.XCODEBUILD_PATH || 'xcodebuild'
+
+      // Determine available schemes by querying xcodebuild -list rather than guessing
+      async function detectScheme(xcodeCmdInner: string, workspacePath?: string, projectPathFull?: string, cwd?: string): Promise<string | null> {
+        try {
+          const args = workspacePath ? ['-list', '-workspace', workspacePath] : ['-list', '-project', projectPathFull!]
+          // Run xcodebuild directly to list schemes
+          const res = spawnSync(xcodeCmdInner, args, { cwd: cwd || projectRootDir, encoding: 'utf8', timeout: 20000 })
+          const out = res.stdout || ''
+          const schemesMatch = out.match(/Schemes:\s*\n([\s\S]*?)(?:\n\n|$)/m)
+          if (schemesMatch) {
+            const block = schemesMatch[1]
+            const schemes = block.split(/\n/).map(s => s.trim()).filter(Boolean)
+            if (schemes.length) return schemes[0]
+          }
+        } catch {}
+        return null
+      }
+
       let buildArgs: string[]
+      let chosenScheme: string | null = null
       if (workspace) {
         const workspacePath = path.join(projectRootDir, workspace)
-        const scheme = workspace.replace(/\.xcworkspace$/, '')
+        chosenScheme = await detectScheme(xcodeCmd, workspacePath, undefined, projectRootDir)
+        const scheme = chosenScheme || workspace.replace(/\.xcworkspace$/, '')
         buildArgs = ['-workspace', workspacePath, '-scheme', scheme, '-configuration', 'Debug', '-sdk', 'iphonesimulator', 'build']
       } else {
         const projectPathFull = path.join(projectRootDir, proj!)
-        const scheme = proj!.replace(/\.xcodeproj$/, '')
+        chosenScheme = await detectScheme(xcodeCmd, undefined, projectPathFull, projectRootDir)
+        const scheme = chosenScheme || proj!.replace(/\.xcodeproj$/, '')
         buildArgs = ['-project', projectPathFull, '-scheme', scheme, '-configuration', 'Debug', '-sdk', 'iphonesimulator', 'build']
       }
 
@@ -73,7 +98,6 @@ export class iOSManage {
       // Skip specifying -resultBundlePath to avoid platform-specific collisions; rely on stdout/stderr logs
 
 
-      const xcodeCmd = process.env.XCODEBUILD_PATH || 'xcodebuild'
       const XCODEBUILD_TIMEOUT = parseInt(process.env.MCP_XCODEBUILD_TIMEOUT || '', 10) || 180000 // default 3 minutes
       const MAX_RETRIES = parseInt(process.env.MCP_XCODEBUILD_RETRIES || '', 10) || 1
 
@@ -85,7 +109,7 @@ export class iOSManage {
       for (let attempt = 1; attempt <= tries; attempt++) {
         // Run xcodebuild with a watchdog
         const res = await new Promise<{ code: number | null, stdout: string, stderr: string, killedByWatchdog?: boolean }>((resolve) => {
-          const proc = spawn(xcodeCmd, buildArgs, { cwd: projectPath })
+          const proc = spawn(xcodeCmd, buildArgs, { cwd: projectRootDir })
           let stdout = ''
           let stderr = ''
 
@@ -119,6 +143,10 @@ export class iOSManage {
 
         // record the failure for reporting
         lastErr = new Error(res.stderr || `xcodebuild failed with code ${res.code}`)
+        // Attach exit code and watchdog info so diagnostics can include them
+        ;(lastErr as any).code = res.code
+        ;(lastErr as any).exitCode = res.code
+        ;(lastErr as any).killedByWatchdog = !!res.killedByWatchdog
 
         // write logs for diagnostics (helpful whether killed or not)
         try {
@@ -136,8 +164,10 @@ export class iOSManage {
       }
 
       if (lastErr) {
-        // Include diagnostics and result bundle path when available
-        return { error: `xcodebuild failed: ${lastErr.message}. See build-results for logs.`, output: `stdout:\n${lastStdout}\nstderr:\n${lastStderr}` }
+        // Include diagnostics and result bundle path when available; provide structured info useful for agents
+        const invokedCommand = `${xcodeCmd} ${buildArgs.map(a => a.includes(' ') ? `"${a}"` : a).join(' ')}`
+        const envSnapshot = { PATH: process.env.PATH }
+        return { error: `xcodebuild failed: ${lastErr.message}. See build-results for logs.`, output: `stdout:\n${lastStdout}\nstderr:\n${lastStderr}`, diagnostics: { exitCode: (lastErr as any).code || null, invokedCommand, cwd: projectRootDir, envSnapshot } }
       }
 
       // Try to locate built .app. First search project tree, then DerivedData if necessary

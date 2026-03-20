@@ -1,4 +1,4 @@
-import { resolveTargetDevice } from '../resolve-device.js'
+import { resolveTargetDevice } from '../utils/resolve-device.js'
 import { AndroidInteract } from '../android/interact.js'
 import { iOSInteract } from '../ios/interact.js'
 
