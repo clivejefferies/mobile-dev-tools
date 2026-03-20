@@ -59,8 +59,8 @@ export class iOSManage {
         try {
           const args = workspacePath ? ['-list', '-workspace', workspacePath] : ['-list', '-project', projectPathFull!]
           // Run xcodebuild directly to list schemes
-          const res = spawnSync(xcodeCmdInner, args, { cwd: cwd || projectRootDir, encoding: 'utf8', timeout: 20000 }) as any
-          const out = res && res.stdout ? String(res.stdout) : ''
+          const res = spawnSync(xcodeCmdInner, args, { cwd: cwd || projectRootDir, encoding: 'utf8', timeout: 20000 })
+          const out = res.stdout || ''
           const schemesMatch = out.match(/Schemes:\s*\n([\s\S]*?)(?:\n\n|$)/m)
           if (schemesMatch) {
             const block = schemesMatch[1]
@@ -143,6 +143,10 @@ export class iOSManage {
 
         // record the failure for reporting
         lastErr = new Error(res.stderr || `xcodebuild failed with code ${res.code}`)
+        // Attach exit code and watchdog info so diagnostics can include them
+        ;(lastErr as any).code = res.code
+        ;(lastErr as any).exitCode = res.code
+        ;(lastErr as any).killedByWatchdog = !!res.killedByWatchdog
 
         // write logs for diagnostics (helpful whether killed or not)
         try {

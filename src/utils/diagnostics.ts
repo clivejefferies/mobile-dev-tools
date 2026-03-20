@@ -42,7 +42,7 @@ import { getAdbCmd } from '../android/utils.js'
 export function execAdbWithDiagnostics(args: string[], deviceId?: string) {
   const adbArgs = deviceId ? ['-s', deviceId, ...args] : args
   const timeout = 120000
-  const res = spawnSync(getAdbCmd(), adbArgs, { encoding: 'utf8', timeout }) as any
+  const res = spawnSync(getAdbCmd(), adbArgs, { encoding: 'utf8', timeout })
   const runResult: RunResult = {
     exitCode: typeof res.status === 'number' ? res.status : null,
     stdout: res.stdout || '',
