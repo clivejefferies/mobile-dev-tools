@@ -1,5 +1,5 @@
-import { iOSObserve } from '../src/ios/observe.js';
-import { iOSInteract } from '../src/ios/interact.js';
+import { iOSObserve } from '../../ios/observe.js';
+import { iOSInteract } from '../../ios/interact.js';
 
 async function main() {
   const deviceId = 'booted';

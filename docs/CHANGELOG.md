@@ -2,6 +2,15 @@
 
 All notable changes to the **Mobile Debug MCP** project will be documented in this file.
 
+## [0.12.1]
+- Improve iOS build/install reliability: project auto-scan, explicit simulator destination, configurable watchdog timeout (MCP_XCODEBUILD_TIMEOUT) and retries (MCP_XCODEBUILD_RETRIES), and DerivedData fallback for locating .app artifacts.
+- Make install_app capable of building iOS projects before installing so agents can autonomously fix, build, install and validate apps.
+- Migrate CLI scripts into typed src/cli/* modules and update npm scripts; fix ESM import paths and lint issues.
+- Add preflight checks and idb resolution helpers (getIdbCmd, isIDBInstalled) and add idb_companion health checks.
+- Capture build stdout/stderr into build-results/ for easier diagnostics and surfaced suggestions when KMP frameworks are missing.
+- Add device test runner under test/device and gate device-dependent tests behind RUN_DEVICE_TESTS.
+
+
 ## [0.12.0]
 - Add iOS idb integration: config-driven idb path resolution (MCP_IDB_PATH / MCP config / IDB_PATH), robust idb detection and parsing of `ui describe-all` output.
 - Add reusable helpers: `isIDBInstalled()` and `getIdbCmd()` to centralise idb resolution and diagnostics.

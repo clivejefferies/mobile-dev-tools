@@ -8,37 +8,154 @@ export class iOSManage {
   async build(projectPath: string, _variant?: string): Promise<{ artifactPath: string, output?: string } | { error: string }> {
     void _variant
     try {
-      const files = await fs.readdir(projectPath).catch(() => [])
-      const workspace = files.find(f => f.endsWith('.xcworkspace'))
-      const proj = files.find(f => f.endsWith('.xcodeproj'))
-      if (!workspace && !proj) return { error: 'No Xcode project or workspace found' }
+      // Look for an Xcode workspace or project at the provided path. If not present, scan subdirectories (limited depth)
+      async function findProject(root: string, maxDepth = 3): Promise<{ dir: string, workspace?: string, proj?: string } | null> {
+        try {
+          const ents = await fs.readdir(root, { withFileTypes: true }).catch(() => [])
+          for (const e of ents) {
+            // .xcworkspace and .xcodeproj are directories on disk (bundles), not regular files
+            if (e.name.endsWith('.xcworkspace')) return { dir: root, workspace: e.name }
+            if (e.name.endsWith('.xcodeproj')) return { dir: root, proj: e.name }
+          }
+        } catch {}
+
+        if (maxDepth <= 0) return null
+
+        try {
+          const ents = await fs.readdir(root, { withFileTypes: true }).catch(() => [])
+          for (const e of ents) {
+            if (e.isDirectory()) {
+              const candidate = await findProject(path.join(root, e.name), maxDepth - 1)
+              if (candidate) return candidate
+            }
+          }
+        } catch {}
+
+        return null
+      }
+
+      const projectInfo = await findProject(projectPath, 3)
+      if (!projectInfo) return { error: 'No Xcode project or workspace found' }
+      const projectRootDir = projectInfo.dir || projectPath
+      const workspace = projectInfo.workspace
+      const proj = projectInfo.proj
+
+      // Determine destination: prefer explicit env var, otherwise use booted simulator UDID
+      let destinationUDID = process.env.MCP_XCODE_DESTINATION_UDID || process.env.MCP_XCODE_DESTINATION || ''
+      if (!destinationUDID) {
+        try {
+          const meta = await getIOSDeviceMetadata('booted')
+          if (meta && meta.id) destinationUDID = meta.id
+        } catch {}
+      }
 
       let buildArgs: string[]
       if (workspace) {
-        const workspacePath = path.join(projectPath, workspace)
+        const workspacePath = path.join(projectRootDir, workspace)
         const scheme = workspace.replace(/\.xcworkspace$/, '')
         buildArgs = ['-workspace', workspacePath, '-scheme', scheme, '-configuration', 'Debug', '-sdk', 'iphonesimulator', 'build']
       } else {
-        const projectPathFull = path.join(projectPath, proj!)
+        const projectPathFull = path.join(projectRootDir, proj!)
         const scheme = proj!.replace(/\.xcodeproj$/, '')
         buildArgs = ['-project', projectPathFull, '-scheme', scheme, '-configuration', 'Debug', '-sdk', 'iphonesimulator', 'build']
       }
 
-      await new Promise<void>((resolve, reject) => {
-        const xcodeCmd = process.env.XCODEBUILD_PATH || 'xcodebuild'
-        const proc = spawn(xcodeCmd, buildArgs, { cwd: projectPath })
-        let stderr = ''
-        proc.stderr?.on('data', d => stderr += d.toString())
-        proc.on('close', code => {
-          if (code === 0) resolve()
-          else reject(new Error(stderr || `xcodebuild failed with code ${code}`))
-        })
-        proc.on('error', err => reject(err))
-      })
+      // If we have a destination UDID, add an explicit destination to avoid xcodebuild picking an ambiguous target
+      if (destinationUDID) {
+        buildArgs.push('-destination', `platform=iOS Simulator,id=${destinationUDID}`)
+      }
 
+      // Add result bundle path for diagnostics
+      const resultsDir = path.join(projectPath, 'build-results')
+      // Remove any stale results to avoid xcodebuild complaining about existing result bundles
+      await fs.rm(resultsDir, { recursive: true, force: true }).catch(() => {})
+      await fs.mkdir(resultsDir, { recursive: true }).catch(() => {})
+      // Skip specifying -resultBundlePath to avoid platform-specific collisions; rely on stdout/stderr logs
+
+
+      const xcodeCmd = process.env.XCODEBUILD_PATH || 'xcodebuild'
+      const XCODEBUILD_TIMEOUT = parseInt(process.env.MCP_XCODEBUILD_TIMEOUT || '', 10) || 180000 // default 3 minutes
+      const MAX_RETRIES = parseInt(process.env.MCP_XCODEBUILD_RETRIES || '', 10) || 1
+
+      const tries = MAX_RETRIES + 1
+      let lastStdout = ''
+      let lastStderr = ''
+      let lastErr: any = null
+
+      for (let attempt = 1; attempt <= tries; attempt++) {
+        // Run xcodebuild with a watchdog
+        const res = await new Promise<{ code: number | null, stdout: string, stderr: string, killedByWatchdog?: boolean }>((resolve) => {
+          const proc = spawn(xcodeCmd, buildArgs, { cwd: projectPath })
+          let stdout = ''
+          let stderr = ''
+
+          proc.stdout?.on('data', d => stdout += d.toString())
+          proc.stderr?.on('data', d => stderr += d.toString())
+
+          let killed = false
+          const to = setTimeout(() => {
+            killed = true
+            try { proc.kill('SIGKILL') } catch {}
+          }, XCODEBUILD_TIMEOUT)
+
+          proc.on('close', (code) => {
+            clearTimeout(to)
+            resolve({ code, stdout, stderr, killedByWatchdog: killed })
+          })
+          proc.on('error', (err) => {
+            clearTimeout(to)
+            resolve({ code: null, stdout, stderr: String(err), killedByWatchdog: killed })
+          })
+        })
+
+        lastStdout = res.stdout
+        lastStderr = res.stderr
+
+        if (res.code === 0) {
+          // success — clear any previous error and stop retrying
+          lastErr = null
+          break
+        }
+
+        // record the failure for reporting
+        lastErr = new Error(res.stderr || `xcodebuild failed with code ${res.code}`)
+
+        // write logs for diagnostics (helpful whether killed or not)
+        try {
+          await fs.writeFile(path.join(resultsDir, `xcodebuild-${attempt}.stdout.log`), res.stdout).catch(() => {})
+          await fs.writeFile(path.join(resultsDir, `xcodebuild-${attempt}.stderr.log`), res.stderr).catch(() => {})
+        } catch {}
+
+        // If killed by watchdog and there are remaining attempts, continue to retry
+        if (res.killedByWatchdog && attempt < tries) {
+          continue
+        }
+
+        // no more retries or not a watchdog kill — break to report lastErr
+        if (attempt >= tries) break
+      }
+
+      if (lastErr) {
+        // Include diagnostics and result bundle path when available
+        return { error: `xcodebuild failed: ${lastErr.message}. See build-results for logs.`, output: `stdout:\n${lastStdout}\nstderr:\n${lastStderr}` }
+      }
+
+      // Try to locate built .app. First search project tree, then DerivedData if necessary
       const built = await findAppBundle(projectPath)
-      if (!built) return { error: 'Could not find .app after build' }
-      return { artifactPath: built }
+      if (built) return { artifactPath: built }
+
+      // Fallback: search DerivedData for matching product
+      const dd = path.join(process.env.HOME || '', 'Library', 'Developer', 'Xcode', 'DerivedData')
+      try {
+        const entries = await fs.readdir(dd).catch(() => [])
+        for (const e of entries) {
+          const candidate = path.join(dd, e)
+          const found = await findAppBundle(candidate).catch(() => undefined)
+          if (found) return { artifactPath: found }
+        }
+      } catch {}
+
+      return { error: 'Could not find .app after build' }
     } catch (e) {
       return { error: e instanceof Error ? e.message : String(e) }
     }

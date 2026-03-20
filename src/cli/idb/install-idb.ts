@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-import { execSync, spawnSync } from 'child_process'
+import { spawnSync } from 'child_process'
 import readline from 'readline'
-import { getIdbCmd, isIDBInstalled, commandWhich } from './idb-helper'
+import { getIdbCmd, isIDBInstalled, commandWhich } from './idb-helper.js'
 
 const IDB_PKG = 'fb-idb'
 
@@ -67,7 +67,7 @@ async function main() {
         console.warn(`${a.name} install failed: ${e instanceof Error ? e.message : String(e)}`)
       }
 
-      const found = which('idb') || which('command -v idb')
+      const found = commandWhich('idb') || commandWhich('command -v idb')
       if (found) {
         console.log('idb installed at:', found)
         process.exit(0)

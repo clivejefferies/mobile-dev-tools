@@ -10,8 +10,9 @@
     "build": "tsc",
     "start": "node ./dist/server.js",
     "prepare": "npm run build",
-    "healthcheck": "tsx ./scripts/check-idb.ts",
-    "install-idb": "tsx ./scripts/install-idb.ts",
+    "healthcheck": "tsx ./src/cli/idb/check-idb.ts",
+    "install-idb": "tsx ./src/cli/idb/install-idb.ts",
+    "preflight-ios": "tsx ./src/cli/ios/preflight-ios.ts",
     "test:unit": "tsx test/unit/index.ts",
     "test:integration": "npm run build && tsx test/device/index.ts",
     "test:device": "npm run build && tsx test/device/index.ts",
@@ -19,6 +20,7 @@
     "lint": "eslint --ext .ts,.js src test --quiet",
     "lint:fix": "eslint --ext .ts,.js src test --fix"
   },
+
   "engines": {
     "node": ">=18"
   },

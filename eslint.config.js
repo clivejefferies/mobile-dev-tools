@@ -12,7 +12,6 @@ export default [
       '.vscode/',
       'coverage/',
       '.env',
-      'scripts/'
     ]
   },
   // Apply rules to JS/TS source
@@ -58,9 +57,9 @@ export default [
       '@typescript-eslint/no-unused-vars': 'off'
     }
   },
-  // Apply rules to scripts and tooling (support TS syntax in scripts)
+  // Apply rules to CLI tooling
   {
-    files: ['scripts/**/*.ts', 'scripts/**/*.js'],
+    files: ['src/cli/**/*.ts', 'src/cli/**/*.js'],
     languageOptions: {
       parser: tsParser,
       parserOptions: {
