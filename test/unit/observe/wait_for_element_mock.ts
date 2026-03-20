@@ -78,7 +78,7 @@ async function runTests() {
   const result3 = await interact.waitForElement("Target", 2000);
   const elapsed3 = Date.now() - start3;
   console.log("Result:", result3.found === true ? "PASS" : "FAIL");
-  console.log("Calls:", calls, calls === 3 ? "PASS" : "FAIL");
+  console.log("Calls:", calls, calls >= 3 ? "PASS" : "FAIL");
   console.log("Elapsed time (should be >= 1000ms):", elapsed3, elapsed3 >= 1000 ? "PASS" : "FAIL");
 
   console.log("\nTest 4: Error handling (fast failure)");

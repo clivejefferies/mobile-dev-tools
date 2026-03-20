@@ -1,8 +1,11 @@
 #!/usr/bin/env node
 import { ToolsManage } from '../../../dist/tools/manage.js'
+import path from 'path'
 
 async function main() {
-  const project = '/Users/clivejefferies/Projects/modul8'
+  // Prefer a repo-local sample modul8 project if present, otherwise allow overriding via KMP_PROJECT env var
+  const defaultRelative = path.join(process.cwd(), '..', '..', '..', '..', 'test-fixtures', 'modul8')
+  const project = process.env.KMP_PROJECT || defaultRelative
   console.log('Running KMP build+install for project', project)
   // Use projectType=kmp and let handler pick android by default for KMP
   // Request iOS explicitly for this run to test iOS build path

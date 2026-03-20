@@ -7,13 +7,13 @@ Enumerate connected Android devices and iOS simulators.
 
 Input (optional):
 
-```
+```json
 { "platform": "android" }
 ```
 
 Response:
 
-```
+```json
 { "devices": [ { "id": "emulator-5554", "platform": "android", "osVersion": "11", "model": "sdk_gphone64_arm64", "simulator": true, "appInstalled": false } ] }
 ```
 
@@ -29,13 +29,13 @@ Input (examples):
 
 Android:
 
-```
+```json
 { "projectPath": "/path/to/project", "gradleTask": "assembleDebug", "maxWorkers": 4 }
 ```
 
 iOS:
 
-```
+```json
 { "projectPath": "/path/to/project", "scheme": "AppScheme", "derivedDataPath": "/tmp/derived", "buildJobs": 4 }
 ```
 
@@ -56,7 +56,7 @@ Framework-specific helpers. These are best-effort and may delegate to native sub
 
 Input (flutter example):
 
-```
+```json
 { "projectPath": "/path/to/flutter", "platform": "android", "buildMode": "debug" }
 ```
 
@@ -77,13 +77,13 @@ Orchestrates build then install and returns streamed NDJSON events and a final r
 
 Input:
 
-```
+```json
 { "projectPath": "/path/to/project", "platform": "android", "deviceId": "emulator-5554", "projectType": "kmp" }
 ```
 
 NDJSON events (example stream):
 
-```
+```json
 {"type":"build","status":"started","platform":"android"}
 {"type":"build","status":"finished","artifactPath":"/path/to/app.apk"}
 {"type":"install","status":"started","artifactPath":"/path/to/app.apk","deviceId":"emulator-5554"}
@@ -92,7 +92,7 @@ NDJSON events (example stream):
 
 Final result:
 
-```
+```json
 { "success": true, "artifactPath": "/path/to/app.apk", "device": { "platform": "android", "id": "emulator-5554" }, "output": "Performing Streamed Install\nSuccess" }
 ```
 
@@ -107,13 +107,13 @@ Install an app onto a connected device or simulator.
 
 Input:
 
-```
+```json
 { "platform": "android", "appPath": "/path/to/app.apk", "deviceId": "emulator-5554" }
 ```
 
 Response:
 
-```
+```json
 { "device": { "platform": "android", "id": "emulator-5554" }, "installed": true, "output": "Performing Streamed Install\nSuccess" }
 ```
 
@@ -128,13 +128,13 @@ Standard app lifecycle operations.
 
 start_app input example:
 
-```
+```json
 { "platform": "android", "appId": "com.example.app", "deviceId": "emulator-5554" }
 ```
 
 start_app response example:
 
-```
+```json
 { "device": { "platform": "android", "id": "emulator-5554" }, "appStarted": true, "launchTimeMs": 142 }
 ```
 
