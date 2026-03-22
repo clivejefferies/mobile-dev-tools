@@ -1,6 +1,5 @@
 import { resolveTargetDevice } from '../utils/resolve-device.js'
 import { AndroidInteract } from '../android/interact.js'
-import { ToolsObserve } from './observe.js'
 import { iOSInteract } from '../ios/interact.js'
 
 export class ToolsInteract {
