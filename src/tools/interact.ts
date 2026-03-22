@@ -1,5 +1,6 @@
 import { resolveTargetDevice } from '../utils/resolve-device.js'
 import { AndroidInteract } from '../android/interact.js'
+import { ToolsObserve } from './observe.js'
 import { iOSInteract } from '../ios/interact.js'
 
 export class ToolsInteract {
@@ -26,9 +27,15 @@ export class ToolsInteract {
     }
   }
 
-  static async swipeHandler({ x1, y1, x2, y2, duration, deviceId }: { x1: number, y1: number, x2: number, y2: number, duration: number, deviceId?: string }) {
-    const resolved = await resolveTargetDevice({ platform: 'android', deviceId })
-    return await new AndroidInteract().swipe(x1, y1, x2, y2, duration, resolved.id)
+  static async swipeHandler({ platform = 'android', x1, y1, x2, y2, duration, deviceId }: { platform?: 'android' | 'ios', x1: number, y1: number, x2: number, y2: number, duration: number, deviceId?: string }) {
+    const effectivePlatform = platform || 'android'
+    if (effectivePlatform === 'android') {
+      const resolved = await resolveTargetDevice({ platform: 'android', deviceId })
+      return await new AndroidInteract().swipe(x1, y1, x2, y2, duration, resolved.id)
+    } else {
+      const resolved = await resolveTargetDevice({ platform: 'ios', deviceId })
+      return await new iOSInteract().swipe(x1, y1, x2, y2, duration, resolved.id)
+    }
   }
 
   static async typeTextHandler({ text, deviceId }: { text: string, deviceId?: string }) {
@@ -39,6 +46,17 @@ export class ToolsInteract {
   static async pressBackHandler({ deviceId }: { deviceId?: string }) {
     const resolved = await resolveTargetDevice({ platform: 'android', deviceId })
     return await new AndroidInteract().pressBack(resolved.id)
+  }
+
+  static async scrollToElementHandler({ platform, selector, direction = 'down', maxScrolls = 10, scrollAmount = 0.7, deviceId }: { platform: 'android' | 'ios', selector: { text?: string, resourceId?: string, contentDesc?: string, className?: string }, direction?: 'down' | 'up', maxScrolls?: number, scrollAmount?: number, deviceId?: string }) {
+    const effectivePlatform = platform || 'android'
+    if (effectivePlatform === 'android') {
+      const resolved = await resolveTargetDevice({ platform: 'android', deviceId })
+      return await new AndroidInteract().scrollToElement(selector, direction, maxScrolls, scrollAmount, resolved.id)
+    } else {
+      const resolved = await resolveTargetDevice({ platform: 'ios', deviceId })
+      return await new iOSInteract().scrollToElement(selector, direction, maxScrolls, scrollAmount, resolved.id)
+    }
   }
 
 }
