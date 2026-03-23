@@ -76,6 +76,50 @@ Response:
 
 ---
 
+## capture_debug_snapshot
+Capture a complete debug snapshot of the app state for diagnostics and post-mortem analysis.
+
+Input:
+
+```json
+{
+  "reason": "optional string describing why snapshot is taken",
+  "includeLogs": true,
+  "logLines": 200,
+  "platform": "android | ios",
+  "appId": "optional package/bundle id to scope logs",
+  "deviceId": "optional device serial/udid",
+  "sessionId": "optional log stream session id to prefer"
+}
+```
+
+Behavior:
+- Captures screenshot (base64), current activity (Android), screen fingerprint, full UI tree, and recent logs.
+- Prefers active log stream entries (read_log_stream) and falls back to get_logs when no active stream is available.
+- Returns partial data when components fail and includes per-part error fields (e.g. `screenshot_error`, `ui_tree_error`).
+- Caps logs to `logLines` entries and prefers recent entries.
+- Fast by default: does not wait for new logs and avoids long blocking operations.
+
+Response (example):
+
+```json
+{
+  "timestamp": 1710000000,
+  "reason": "Crash after tapping checkout",
+  "activity": "CheckoutActivity",
+  "fingerprint": "abc123",
+  "screenshot": "<base64 PNG string>",
+  "ui_tree": { ... },
+  "logs": [ { "timestamp": 1710000000, "level": "ERROR", "message": "NullPointerException at CheckoutViewModel" } ]
+}
+```
+
+Notes:
+- Useful immediately after detecting crashes or unexpected UI behaviour.
+- Do not expect perfect data during a crash; tool is designed to return best-effort context and include errors for failed parts.
+
+---
+
 ## get_screen_fingerprint
 Generate a stable fingerprint representing the visible screen. Useful for detecting navigation changes, preventing loops, and synchronisation.
 

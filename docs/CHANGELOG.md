@@ -2,6 +2,9 @@
 
 All notable changes to the **Mobile Debug MCP** project will be documented in this file.
 
+## [0.17.0]
+- Added `capture_debug_snapshot` observe tool: captures a full debugging snapshot including screenshot (base64), UI tree, current activity (Android), screen fingerprint, and recent logs (prefers active log stream, falls back to snapshot logs). Returns a single structured JSON object and includes per-part error fields for partial failures. Implemented as `ToolsObserve.captureDebugSnapshotHandler` and registered in the server.
+
 ## [0.16.0]
 - Added `wait_for_screen_change` interact tool: polls the platform-specific `get_screen_fingerprint` until it differs from a provided `previousFingerprint`, with configurable `timeoutMs` and `pollIntervalMs` and an optional stability confirmation poll to avoid reacting to transient UI flickers. Implemented at the interact layer and delegates fingerprinting to the observe implementations (Android/iOS).
 - Added unit tests covering immediate change, transient null fingerprints, stability confirmation and timeout behavior: `test/interact/unit/wait_for_screen_change.test.ts`.

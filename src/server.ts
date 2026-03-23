@@ -216,6 +216,23 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       }
     },
     {
+      name: "capture_debug_snapshot",
+      description: "Capture a complete debug snapshot (screenshot, ui tree, activity, fingerprint, logs). Returns structured JSON."
+      ,
+      inputSchema: {
+        type: "object",
+        properties: {
+          reason: { type: "string", description: "Optional reason for snapshot" },
+          includeLogs: { type: "boolean", description: "Whether to include logs", default: true },
+          logLines: { type: "number", description: "Maximum number of log lines to include", default: 200 },
+          platform: { type: "string", enum: ["android","ios"], description: "Optional platform override" },
+          appId: { type: "string", description: "Optional appId to scope logs (package/bundle id)" },
+          deviceId: { type: "string", description: "Optional device serial/udid" },
+          sessionId: { type: "string", description: "Optional log stream session id to prefer" }
+        }
+      }
+    },
+    {
       name: "start_log_stream",
       description: "Start streaming logs for a target application on Android or iOS. For Android this uses adb logcat --pid=<pid>; for iOS it streams `xcrun simctl spawn <device> log stream` with a predicate.",
       inputSchema: {
@@ -592,6 +609,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           { type: 'image', data: (res as any).screenshot, mimeType: 'image/png' }
         ]
       }
+    }
+
+    if (name === "capture_debug_snapshot") {
+      const { reason, includeLogs = true, logLines = 200, platform, appId, deviceId, sessionId } = args as any
+      const res = await ToolsObserve.captureDebugSnapshotHandler({ reason, includeLogs, logLines, platform, appId, deviceId, sessionId })
+      return wrapResponse(res)
     }
 
     if (name === "get_ui_tree") {

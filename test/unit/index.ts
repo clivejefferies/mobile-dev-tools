@@ -11,5 +11,6 @@ import '../manage/unit/diagnostics.test.ts'
 import '../manage/unit/detection.test.ts'
 import '../manage/unit/mcp_disable_autodetect.test.ts'
 import '../interact/unit/wait_for_screen_change.test.ts'
+import '../observe/unit/capture_debug_snapshot.test.ts'
 
 console.log('Unit tests loaded.')
