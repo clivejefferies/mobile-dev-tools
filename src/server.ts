@@ -346,8 +346,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
         properties: {
           platform: {
             type: "string",
-            enum: ["android"],
-            description: "Platform to swipe on (currently only android supported)"
+            enum: ["android","ios"],
+            description: "Platform to swipe on (android or ios)"
           },
           x1: { type: "number", description: "Start X coordinate" },
           y1: { type: "number", description: "Start Y coordinate" },
@@ -360,6 +360,30 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
           }
         },
         required: ["x1", "y1", "x2", "y2", "duration"]
+      }
+    },
+    {
+      name: "scroll_to_element",
+      description: "Scroll the current screen until a target UI element becomes visible, then return its details.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          platform: { type: "string", enum: ["android", "ios"], description: "Platform to operate on (required)" },
+          selector: {
+            type: "object",
+            properties: {
+              text: { type: "string" },
+              resourceId: { type: "string" },
+              contentDesc: { type: "string" },
+              className: { type: "string" }
+            }
+          },
+          direction: { type: "string", enum: ["down", "up"], default: "down" },
+          maxScrolls: { type: "number", default: 10 },
+          scrollAmount: { type: "number", default: 0.7 },
+          deviceId: { type: "string", description: "Device UDID (iOS) or Serial (Android). Defaults to booted/connected." }
+        },
+        required: ["platform", "selector"]
       }
     },
     {
@@ -568,8 +592,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     if (name === "swipe") {
-      const { x1, y1, x2, y2, duration, deviceId } = (args || {}) as any
-      const res = await ToolsInteract.swipeHandler({ x1, y1, x2, y2, duration, deviceId })
+      const { platform = 'android', x1, y1, x2, y2, duration, deviceId } = (args || {}) as any
+      const res = await ToolsInteract.swipeHandler({ platform, x1, y1, x2, y2, duration, deviceId })
+      return wrapResponse(res)
+    }
+
+    if (name === "scroll_to_element") {
+      const { platform, selector, direction, maxScrolls, scrollAmount, deviceId } = (args || {}) as any
+      const res = await ToolsInteract.scrollToElementHandler({ platform, selector, direction, maxScrolls, scrollAmount, deviceId })
       return wrapResponse(res)
     }
 

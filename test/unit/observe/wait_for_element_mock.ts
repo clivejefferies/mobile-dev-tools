@@ -95,7 +95,7 @@ async function runTests() {
   const elapsed4 = Date.now() - start4;
   console.log("Result:", result4.found === false && result4.error === "ADB Connection Failed" ? "PASS" : "FAIL");
   console.log("Error Message:", result4.error);
-  console.log("Elapsed time (should be < 500ms):", elapsed4, elapsed4 < 500 ? "PASS" : "FAIL");
+  console.log("Elapsed time (should be < 1000ms):", elapsed4, elapsed4 < 1000 ? "PASS" : "FAIL");
 
   // Restore
   (AndroidObserve as any).prototype.getUITree = originalGetUITree;

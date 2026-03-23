@@ -2,6 +2,13 @@
 
 All notable changes to the **Mobile Debug MCP** project will be documented in this file.
 
+## [0.14.0]
+- Added `scroll_to_element` tool: platform-aware helper that scrolls until a UI element matching a selector is visible. Supports Android and iOS with configurable options: direction, maxScrolls, and scrollAmount. Includes unit tests and device runners under `test/device/` for manual E2E validation.
+- Moved scroll logic into platform-specific implementations (`src/android/interact.ts`, `src/ios/interact.ts`) and delegated from `src/tools/interact.ts` to centralise platform behaviour.
+- Fixed iOS `idb` swipe arguments and improved visibility detection by using element bounds and device resolution to avoid treating off-screen elements as visible.
+- Consolidated unit tests for `scroll_to_element` into `test/unit/observe/scroll_to_element.test.ts`, and removed older duplicate test files.
+
+
 ## [0.13.0]
 - Fixed a crash in the `start_app` tool by adding validation to ensure `appId` and `platform` are provided.
 

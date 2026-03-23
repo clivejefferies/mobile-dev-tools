@@ -1,6 +1,7 @@
 import { WaitForElementResponse, TapResponse, SwipeResponse, TypeTextResponse, PressBackResponse } from "../types.js"
 import { execAdb, getAndroidDeviceMetadata, getDeviceInfo } from "./utils.js"
 import { AndroidObserve } from "./observe.js"
+import { scrollToElementShared } from "../tools/scroll_to_element.js"
 
 
 export class AndroidInteract {
@@ -86,6 +87,18 @@ export class AndroidInteract {
     } catch (e) {
       return { device: deviceInfo, success: false, error: e instanceof Error ? e.message : String(e) }
     }
+  }
+
+  async scrollToElement(selector: { text?: string, resourceId?: string, contentDesc?: string, className?: string }, direction: 'down' | 'up' = 'down', maxScrolls = 10, scrollAmount = 0.7, deviceId?: string) {
+    return await scrollToElementShared({
+      selector,
+      direction,
+      maxScrolls,
+      scrollAmount,
+      deviceId,
+      fetchTree: async () => await this.observe.getUITree(deviceId),
+      swipe: async (x1: number, y1: number, x2: number, y2: number, duration: number, devId?: string) => await this.swipe(x1, y1, x2, y2, duration, devId)
+    })
   }
 
 }

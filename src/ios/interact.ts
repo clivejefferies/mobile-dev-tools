@@ -1,7 +1,8 @@
 import { spawn } from "child_process"
-import { WaitForElementResponse, TapResponse } from "../types.js"
+import { WaitForElementResponse, TapResponse, SwipeResponse } from "../types.js"
 import { getIOSDeviceMetadata, getIdbCmd, isIDBInstalled } from "./utils.js"
 import { iOSObserve } from "./observe.js"
+import { scrollToElementShared } from "../tools/scroll_to_element.js"
 
 export class iOSInteract {
   private observe = new iOSObserve();
@@ -75,4 +76,58 @@ export class iOSInteract {
       return { device, success: false, x, y, error: e instanceof Error ? e.message : String(e) };
     }
   }
+
+  async swipe(x1: number, y1: number, x2: number, y2: number, duration: number, deviceId: string = "booted"): Promise<SwipeResponse> {
+    const device = await getIOSDeviceMetadata(deviceId);
+    // Use shared helper to detect idb
+    const idbExists = await isIDBInstalled();
+
+    if (!idbExists) {
+      return {
+        device,
+        success: false,
+        start: [x1, y1],
+        end: [x2, y2],
+        duration,
+        error: "iOS swipe requires 'idb' (iOS Device Bridge)."
+      }
+    }
+
+    try {
+      const targetUdid = (device.id && device.id !== 'booted') ? device.id : undefined;
+      // idb 'ui swipe' does not accept a duration parameter; use coordinates only
+      const args: string[] = ['ui', 'swipe', x1.toString(), y1.toString(), x2.toString(), y2.toString()];
+      if (targetUdid) {
+        args.push('--udid', targetUdid);
+      }
+
+      await new Promise<void>((resolve, reject) => {
+        const proc = spawn(getIdbCmd(), args);
+        let stderr = '';
+        proc.stderr.on('data', d => stderr += d.toString());
+        proc.on('close', code => {
+          if (code === 0) resolve();
+          else reject(new Error(`idb ui swipe failed: ${stderr}`));
+        });
+        proc.on('error', err => reject(err));
+      });
+
+      return { device, success: true, start: [x1, y1], end: [x2, y2], duration };
+    } catch (e) {
+      return { device, success: false, start: [x1, y1], end: [x2, y2], duration, error: e instanceof Error ? e.message : String(e) };
+    }
+  }
+
+  async scrollToElement(selector: { text?: string, resourceId?: string, contentDesc?: string, className?: string }, direction: 'down' | 'up' = 'down', maxScrolls = 10, scrollAmount = 0.7, deviceId: string = 'booted') {
+    return await scrollToElementShared({
+      selector,
+      direction,
+      maxScrolls,
+      scrollAmount,
+      deviceId,
+      fetchTree: async () => await this.observe.getUITree(deviceId),
+      swipe: async (x1: number, y1: number, x2: number, y2: number, duration: number, devId?: string) => await this.swipe(x1, y1, x2, y2, duration, devId)
+    })
+  }
 }
+
