@@ -14,11 +14,11 @@ import {
   InstallAppResponse
 } from "./types.js"
 
-import { ToolsManage } from './tools/manage.js'
-import { ToolsInteract } from './tools/interact.js'
-import { ToolsObserve } from './tools/observe.js'
-import { AndroidManage } from './android/manage.js'
-import { iOSManage } from './ios/manage.js'
+import { ToolsManage } from './manage/index.js'
+import { ToolsInteract } from './interact/index.js'
+import { ToolsObserve } from './observe/index.js'
+import { AndroidManage } from './manage/index.js'
+import { iOSManage } from './manage/index.js'
 
 
 const server = new Server(
@@ -280,6 +280,17 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
             type: "string",
             description: "Device Serial (Android). Defaults to connected/booted device."
           }
+        }
+      }
+    },
+    {
+      name: "get_screen_fingerprint",
+      description: "Generate a stable fingerprint representing the current visible screen (activity + visible UI elements).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          platform: { type: "string", enum: ["android", "ios"], description: "Optional platform override (android|ios)" },
+          deviceId: { type: "string", description: "Optional device id/udid to target" }
         }
       }
     },
@@ -579,6 +590,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       return wrapResponse(res)
     }
 
+    if (name === "get_screen_fingerprint") {
+      const { platform, deviceId } = (args || {}) as any
+      const res = await ToolsObserve.getScreenFingerprintHandler({ platform, deviceId })
+      return wrapResponse(res)
+    }
+
     if (name === "wait_for_element") {
       const { platform, text, timeout, deviceId } = (args || {}) as any
       const res = await ToolsInteract.waitForElementHandler({ platform, text, timeout, deviceId })
@@ -644,7 +661,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 const transport = new StdioServerTransport()
 
 async function main() {
-  await server.connect(transport)
+  await (server as any).connect(transport)
 }
 
 main().catch((error) => {

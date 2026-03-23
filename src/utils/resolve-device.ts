@@ -1,6 +1,6 @@
 import { DeviceInfo } from "../types.js"
-import { listAndroidDevices } from "../android/utils.js"
-import { listIOSDevices } from "../ios/utils.js"
+import { listAndroidDevices } from "./android/utils.js"
+import { listIOSDevices } from "./ios/utils.js"
 
 export interface ResolveOptions {
   platform: "android" | "ios"

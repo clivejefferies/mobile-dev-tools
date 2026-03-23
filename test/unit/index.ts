@@ -1,13 +1,14 @@
-// Aggregator entrypoint for unit tests
-import './utils/detect-java.test.ts'
-import './observe/logparse.test.ts'
-import './observe/logstream.test.ts'
-import './observe/wait_for_element_mock.ts'
-import './manage/install.test.ts'
-import './manage/build.test.ts'
-import './manage/build_and_install.test.ts'
-import './manage/diagnostics.test.ts'
-import './manage/detection.test.ts'
-import './manage/mcp_disable_autodetect.test.ts'
+// Aggregator entrypoint for unit tests (updated to new test layout)
+import '../observe/unit/logparse.test.ts'
+import '../observe/unit/logstream.test.ts'
+import '../observe/unit/wait_for_element_mock.ts'
+import '../observe/unit/get_screen_fingerprint.test.ts'
+
+import '../manage/unit/install.test.ts'
+import '../manage/unit/build.test.ts'
+import '../manage/unit/build_and_install.test.ts'
+import '../manage/unit/diagnostics.test.ts'
+import '../manage/unit/detection.test.ts'
+import '../manage/unit/mcp_disable_autodetect.test.ts'
 
 console.log('Unit tests loaded.')

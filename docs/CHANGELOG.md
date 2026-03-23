@@ -2,6 +2,10 @@
 
 All notable changes to the **Mobile Debug MCP** project will be documented in this file.
 
+## [0.15.0]
+- Reorganised repository for cohesion: merged tool handlers into feature entrypoints (src/observe, src/interact, src/manage) and moved platform helpers and CLI tooling into src/utils/{android,ios,cli}.
+- Added computeScreenFingerprint utility used by observe/interact to normalise UI element significance across platforms (fingerprint shared between Android and iOS implementations).
+
 ## [0.14.0]
 - Added `scroll_to_element` tool: platform-aware helper that scrolls until a UI element matching a selector is visible. Supports Android and iOS with configurable options: direction, maxScrolls, and scrollAmount. Includes unit tests and device runners under `test/device/` for manual E2E validation.
 - Moved scroll logic into platform-specific implementations (`src/android/interact.ts`, `src/ios/interact.ts`) and delegated from `src/tools/interact.ts` to centralise platform behaviour.

@@ -37,7 +37,7 @@ export class DiagnosticError extends Error {
 
 // Exec ADB with diagnostics — moved from src/android/diagnostics.ts
 import { spawnSync } from 'child_process'
-import { getAdbCmd } from '../android/utils.js'
+import { getAdbCmd } from './android/utils.js'
 
 export function execAdbWithDiagnostics(args: string[], deviceId?: string) {
   const adbArgs = deviceId ? ['-s', deviceId, ...args] : args

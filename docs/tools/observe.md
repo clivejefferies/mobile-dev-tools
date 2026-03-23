@@ -76,6 +76,30 @@ Response:
 
 ---
 
+## get_screen_fingerprint
+Generate a stable fingerprint representing the visible screen. Useful for detecting navigation changes, preventing loops, and synchronisation.
+
+Input (optional):
+
+```
+{ "platform": "android", "deviceId": "emulator-5554" }
+```
+
+Response:
+
+```json
+{ "fingerprint": "<sha256_hex>", "activity": "com.example.app.MainActivity" }
+```
+
+Notes:
+- Uses get_ui_tree and (on Android) get_current_screen as inputs.
+- Normalises visible, interactable or structurally significant elements (class/type, resourceId, text, contentDesc).
+- Trims and lowercases text, filters out likely dynamic values (timestamps, counters).
+- Sorts deterministically (top-to-bottom, left-to-right) and limits elements to 50.
+- Returns fingerprint: null and an error message if the UI tree or activity cannot be retrieved.
+
+---
+
 ## start_log_stream / read_log_stream / stop_log_stream
 Start a background adb logcat stream and retrieve parsed NDJSON entries.
 
