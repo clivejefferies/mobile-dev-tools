@@ -5,6 +5,8 @@ export { AndroidInteract, iOSInteract };
 import { resolveTargetDevice } from '../utils/resolve-device.js'
 import { ToolsObserve } from '../observe/index.js'
 
+interface ScreenFingerprintResponse { fingerprint: string | null }
+
 export class ToolsInteract {
 
   private static async getInteractionService(platform?: 'android' | 'ios', deviceId?: string) {
@@ -51,8 +53,8 @@ export class ToolsInteract {
 
     while (Date.now() - start < timeoutMs) {
       try {
-        const res = await ToolsObserve.getScreenFingerprintHandler({ platform, deviceId })
-        const fp = (res as any)?.fingerprint ?? null
+        const res = await ToolsObserve.getScreenFingerprintHandler({ platform, deviceId }) as ScreenFingerprintResponse | null
+        const fp = res?.fingerprint ?? null
         if (fp === null || fp === undefined) {
           lastFingerprint = null
           await new Promise(resolve => setTimeout(resolve, pollIntervalMs))
@@ -64,9 +66,9 @@ export class ToolsInteract {
         if (fp !== previousFingerprint) {
           // Stability confirmation
           await new Promise(resolve => setTimeout(resolve, pollIntervalMs))
-          try {
-            const confirmRes = await ToolsObserve.getScreenFingerprintHandler({ platform, deviceId })
-            const confirmFp = (confirmRes as any)?.fingerprint ?? null
+              try {
+            const confirmRes = await ToolsObserve.getScreenFingerprintHandler({ platform, deviceId }) as ScreenFingerprintResponse | null
+            const confirmFp = confirmRes?.fingerprint ?? null
             if (confirmFp === fp) {
               return { success: true, newFingerprint: fp, elapsedMs: Date.now() - start }
             }
