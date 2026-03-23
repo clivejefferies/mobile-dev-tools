@@ -4,8 +4,8 @@
  * Usage: RUN_DEVICE_TESTS=true npx tsx run-screen-fingerprint.ts [android|ios] [deviceId]
  */
 
-import { AndroidObserve } from '../../src/android/observe.js'
-import { iOSObserve } from '../../src/ios/observe.js'
+import { AndroidObserve } from '../../../src/android/observe.js'
+import { iOSObserve } from '../../../src/ios/observe.js'
 
 async function main() {
   const args = process.argv.slice(2)
