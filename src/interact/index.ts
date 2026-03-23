@@ -49,10 +49,10 @@ export class ToolsInteract {
     const start = Date.now()
     let lastFingerprint: string | null = null
 
-    while (Date.now() - start < (timeoutMs || 5000)) {
+    while (Date.now() - start < timeoutMs) {
       try {
-        const res = await (await import('../observe/index.js')).ToolsObserve.getScreenFingerprintHandler({ platform, deviceId })
-        const fp = (res && (res as any).fingerprint) ? (res as any).fingerprint : null
+        const res = await ToolsObserve.getScreenFingerprintHandler({ platform, deviceId })
+        const fp = (res as any)?.fingerprint ?? null
         if (fp === null || fp === undefined) {
           lastFingerprint = null
           await new Promise(resolve => setTimeout(resolve, pollIntervalMs))
@@ -64,9 +64,9 @@ export class ToolsInteract {
         if (fp !== previousFingerprint) {
           // Stability confirmation
           await new Promise(resolve => setTimeout(resolve, pollIntervalMs))
-              try {
+          try {
             const confirmRes = await ToolsObserve.getScreenFingerprintHandler({ platform, deviceId })
-            const confirmFp = (confirmRes && (confirmRes as any).fingerprint) ? (confirmRes as any).fingerprint : null
+            const confirmFp = (confirmRes as any)?.fingerprint ?? null
             if (confirmFp === fp) {
               return { success: true, newFingerprint: fp, elapsedMs: Date.now() - start }
             }

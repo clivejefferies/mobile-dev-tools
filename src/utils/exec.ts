@@ -31,13 +31,3 @@ export async function execCmd(cmd: string, args: string[], opts: ExecOptions = {
   })
 }
 
-export async function execWithRetries(cmd: string, args: string[], opts: ExecOptions = {}, retries = 1, backoffMs = 200) {
-  let last: { exitCode: number | null, stdout: string, stderr: string } | null = null
-  for (let i = 0; i < Math.max(1, retries); i++) {
-    const res = await execCmd(cmd, args, opts)
-    last = res
-    if (res.exitCode === 0) return res
-    if (i < retries - 1) await new Promise(r => setTimeout(r, backoffMs * (i + 1)))
-  }
-  return last
-}

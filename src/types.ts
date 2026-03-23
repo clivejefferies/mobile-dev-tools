@@ -144,11 +144,3 @@ export interface InstallAppResponse {
   diagnostics?: any;
 }
 
-export interface PlatformAdapter {
-  build?(projectPath: string, projectType: string, options?: any): Promise<{ artifactPath?: string, stdout?: string, stderr?: string }>
-  install?(artifactPath: string, deviceId?: string, options?: any): Promise<InstallAppResponse>
-  startApp?(appId: string, deviceId?: string, options?: any): Promise<StartAppResponse>
-  terminateApp?(appId: string, deviceId?: string, options?: any): Promise<TerminateAppResponse>
-  getUITree?(deviceId?: string): Promise<GetUITreeResponse>
-  getDeviceMetadata?(deviceId?: string): Promise<DeviceInfo>
-}
