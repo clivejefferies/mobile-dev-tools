@@ -1,4 +1,4 @@
-import { ToolsObserve, AndroidObserve } from '../../../src/observe/index.js'
+import { ToolsObserve } from '../../../src/observe/index.js'
 
 async function run() {
   console.log('Starting capture_debug_snapshot unit tests...')
