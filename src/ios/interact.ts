@@ -2,7 +2,7 @@ import { spawn } from "child_process"
 import { WaitForElementResponse, TapResponse, SwipeResponse } from "../types.js"
 import { getIOSDeviceMetadata, getIdbCmd, isIDBInstalled } from "./utils.js"
 import { iOSObserve } from "./observe.js"
-import { scrollToElementShared } from "../tools/scroll_to_element.js"
+import { scrollToElementShared } from "../shared/scroll_to_element.js"
 
 export class iOSInteract {
   private observe = new iOSObserve();

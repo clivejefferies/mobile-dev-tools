@@ -15,27 +15,18 @@ async function main() {
   console.log(`Running screen fingerprint test for ${platform}${deviceId ? ` on ${deviceId}` : ''}`)
 
   try {
-    if (platform === 'ios') {
-      const obs = new iOSObserve()
-      const res = await obs.getScreenFingerprint(deviceId || 'booted')
-      if (res.error || !res.fingerprint) {
-        console.error('❌ Failed to compute fingerprint:', res.error)
-        process.exit(1)
-      }
-      console.log('Fingerprint:', res.fingerprint)
-      console.log('Activity:', res.activity || '<n/a>')
-      process.exit(0)
-    } else {
-      const obs = new AndroidObserve()
-      const res = await obs.getScreenFingerprint(deviceId)
-      if (res.error || !res.fingerprint) {
-        console.error('❌ Failed to compute fingerprint:', res.error)
-        process.exit(1)
-      }
-      console.log('Fingerprint:', res.fingerprint)
-      console.log('Activity:', res.activity || '<n/a>')
-      process.exit(0)
+    const obs = platform === 'ios' ? new iOSObserve() : new AndroidObserve()
+    const id = platform === 'ios' ? (deviceId || 'booted') : deviceId
+    const res = await (obs as any).getScreenFingerprint(id)
+
+    if (res.error || !res.fingerprint) {
+      console.error('❌ Failed to compute fingerprint:', res.error)
+      process.exit(1)
     }
+
+    console.log('Fingerprint:', res.fingerprint)
+    console.log('Activity:', res.activity || '<n/a>')
+    process.exit(0)
   } catch (err) {
     console.error('❌ Test failed:', err instanceof Error ? err.message : String(err))
     process.exit(1)

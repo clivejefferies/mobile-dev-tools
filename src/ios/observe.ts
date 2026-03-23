@@ -6,6 +6,7 @@ import { execCommand, getIOSDeviceMetadata, validateBundleId, getIdbCmd, getXcru
 import { createWriteStream, promises as fsPromises } from 'fs'
 import path from 'path'
 import { parseLogLine } from '../android/utils.js'
+import { computeScreenFingerprint } from '../shared/fingerprint.js'
 
 // --- Helper Functions Specific to Observe ---
 
@@ -296,55 +297,7 @@ export class iOSObserve {
       const tree = await this.getUITree(deviceId)
       if (!tree || tree.error) return { fingerprint: null, error: tree && (tree as any).error }
 
-      const activity = ''
-
-      const candidates = (tree.elements || []).filter((e: any) => {
-        if (!e) return false
-        if (!e.visible) return false
-        const hasStableText = typeof e.text === 'string' && e.text.trim().length > 0
-        const hasResource = !!e.resourceId
-        const interactable = !!e.clickable || !!e.enabled
-        const structurallySignificant = hasStableText || hasResource || ['Window','Application','View','ViewGroup','LinearLayout','FrameLayout','RelativeLayout','ScrollView','RecyclerView','TextView','ImageView'].includes(e.type)
-        return interactable || structurallySignificant
-      })
-
-      function isDynamicText(t: string) {
-        if (!t) return false
-        const txt = t.trim()
-        if (!txt) return false
-        if (/\b\d{1,2}:\d{2}\b/.test(txt)) return true
-        if (/\b\d{4}-\d{2}-\d{2}\b/.test(txt)) return true
-        if (/^\d+(?:\.\d+)?%$/.test(txt)) return true
-        if (/^\d+$/.test(txt)) return true
-        if (/^[\d,]{1,10}$/.test(txt)) return true
-        return false
-      }
-
-      const normalized = candidates.map((e: any) => ({
-        type: (e.type || '').toString(),
-        resourceId: (e.resourceId || '').toString(),
-        text: typeof e.text === 'string' ? (isDynamicText(e.text) ? '' : e.text.trim().toLowerCase()) : '',
-        contentDesc: (e.contentDescription || e.contentDesc || '').toString(),
-        bounds: Array.isArray(e.bounds) ? e.bounds.slice(0,4).map((n:any)=>Number(n)||0) : [0,0,0,0]
-      }))
-
-      // Filter out elements with no identifying fields (e.g., pure dynamic timestamps)
-      const filteredNormalized = normalized.filter((e:any) => (e.text && e.text.length > 0) || (e.resourceId && e.resourceId.length > 0) || (e.contentDesc && e.contentDesc.length > 0))
-
-      filteredNormalized.sort((a:any,b:any) => {
-        const ay = (a.bounds && a.bounds[1]) || 0
-        const by = (b.bounds && b.bounds[1]) || 0
-        if (ay !== by) return ay - by
-        const ax = (a.bounds && a.bounds[0]) || 0
-        const bx = (b.bounds && b.bounds[0]) || 0
-        return ax - bx
-      })
-
-      const limited = filteredNormalized.slice(0,50)
-      const payload = { activity: (activity || ''), resolution: (tree as any).resolution || { width:0, height:0 }, elements: limited.map((e:any)=>({ type: e.type, resourceId: e.resourceId, text: e.text, contentDesc: e.contentDesc })) }
-      const combined = JSON.stringify(payload)
-      const hash = crypto.createHash('sha256').update(combined).digest('hex')
-      return { fingerprint: hash, activity: activity }
+      return computeScreenFingerprint(tree, null, 'ios', 50)
     } catch (e) {
       return { fingerprint: null, error: e instanceof Error ? e.message : String(e) }
     }
