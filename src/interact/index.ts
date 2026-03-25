@@ -29,6 +29,8 @@ interface UiElement {
   _interactable?: boolean
 }
 
+const STABLE_IDLE_MS = 1000
+
 export class ToolsInteract {
 
   private static async getInteractionService(platform?: 'android' | 'ios', deviceId?: string) {
@@ -278,9 +280,12 @@ export class ToolsInteract {
       const gl = await ToolsObserve.getLogsHandler({ platform, deviceId, lines: 200 })
       const logsArr = Array.isArray((gl as any).logs) ? (gl as any).logs : []
       baselineLastLine = logsArr.length ? logsArr[logsArr.length - 1] : null
-    } catch { /* non-fatal */ }
+    } catch (err) {
+      // non-fatal but surface warning to aid debugging
+      try { console.warn('observeUntil: failed to get baseline logs (non-fatal):', err instanceof Error ? err.message : String(err)) } catch (_) {}
+    }
 
-    const stableIdleMs = 1000
+    
     let lastChangeAt = Date.now()
     let prevFingerprint = initialFingerprint
 
@@ -372,10 +377,10 @@ export class ToolsInteract {
               prevFingerprint = fp
               lastChangeAt = Date.now()
             } else {
-              if (Date.now() - lastChangeAt >= stableIdleMs) {
+              if (Date.now() - lastChangeAt >= STABLE_IDLE_MS) {
                 timeToMatch = Date.now() - start
                 matchSource = 'idle-stable'
-                return { success: true, type: 'idle', matched: true, details: `UI stable for ${stableIdleMs}ms`, timestamp: Date.now(), fingerprint: fp, telemetry: { pollCount, timeToMatch, elapsedMs: Date.now() - start, matchSource } }
+                return { success: true, type: 'idle', matched: true, details: `UI stable for ${STABLE_IDLE_MS}ms`, timestamp: Date.now(), fingerprint: fp, telemetry: { pollCount, timeToMatch, elapsedMs: Date.now() - start, matchSource } }
               }
             }
           } catch (err) { console.error('observeUntil(idle) error:', err) }

@@ -9,6 +9,7 @@ async function runTests() {
   const origGetLogs = (Observe as any).ToolsObserve.getLogsHandler
   const origGetFp = (Observe as any).ToolsObserve.getScreenFingerprintHandler
   const origResolveObserve = (Observe as any).ToolsObserve.resolveObserve
+  const origGetScreenFp = (Observe as any).ToolsObserve.getScreenFingerprintHandler
 
   try {
     // Timeout / snapshot case: ensure snapshot captured when condition not met
@@ -49,14 +50,14 @@ async function runTests() {
 
     // Screen condition: fingerprint changes after a few polls
     let seq = ['A', 'A', 'B']
-    ;(Observe as any).ToolsObserve.resolveObserve = async () => ({ observe: { getScreenFingerprint: async () => ({ fingerprint: seq.length ? seq.shift() : null }) }, resolved: { id: 'mock' } })
+    ;(Observe as any).ToolsObserve.getScreenFingerprintHandler = async () => ({ fingerprint: seq.length ? seq.shift() : null })
     const resScreen = await ToolsInteract.observeUntilHandler({ type: 'screen', timeoutMs: 3000, pollIntervalMs: 100, platform: 'android' })
     const okScreen = resScreen && (resScreen as any).success && (resScreen as any).telemetry && (resScreen as any).telemetry.matchSource === 'screen-fingerprint'
     console.log('Screen Test:', okScreen ? 'PASS' : 'FAIL', JSON.stringify((resScreen as any).telemetry || {}, null, 2))
 
     // Idle condition: stable fingerprints observed
     let idleSeq = ['X', 'X', 'X']
-    ;(Observe as any).ToolsObserve.resolveObserve = async () => ({ observe: { getScreenFingerprint: async () => ({ fingerprint: idleSeq.length ? idleSeq.shift() : 'X' }) }, resolved: { id: 'mock' } })
+    ;(Observe as any).ToolsObserve.getScreenFingerprintHandler = async () => ({ fingerprint: idleSeq.length ? idleSeq.shift() : 'X' })
     const resIdle = await ToolsInteract.observeUntilHandler({ type: 'idle', timeoutMs: 3000, pollIntervalMs: 100, platform: 'android' })
     const okIdle = resIdle && (resIdle as any).success && (resIdle as any).telemetry && (resIdle as any).telemetry.matchSource === 'idle-stable'
     console.log('Idle Test:', okIdle ? 'PASS' : 'FAIL', JSON.stringify((resIdle as any).telemetry || {}, null, 2))
@@ -67,6 +68,8 @@ async function runTests() {
     ;(Observe as any).ToolsObserve.getLogsHandler = origGetLogs
     ;(Observe as any).ToolsObserve.getScreenFingerprintHandler = origGetFp
     ;(Observe as any).ToolsObserve.resolveObserve = origResolveObserve
+    ;(Observe as any).ToolsObserve.getScreenFingerprintHandler = origGetScreenFp
+    ;(Observe as any).ToolsObserve.getScreenFingerprintHandler = origGetScreenFp
   }
 }
 
