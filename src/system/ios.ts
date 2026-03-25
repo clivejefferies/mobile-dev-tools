@@ -1,5 +1,5 @@
 import { execSync } from 'child_process'
-import { getXcrunCmd } from '../../utils/ios/utils.js'
+import { getXcrunCmd } from '../utils/ios/utils.js'
 
 export async function checkIOS() {
   const issues: string[] = []

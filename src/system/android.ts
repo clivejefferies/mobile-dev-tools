@@ -1,5 +1,5 @@
 import { execSync } from 'child_process'
-import { ensureAdbAvailable } from '../../utils/android/utils.js'
+import { ensureAdbAvailable } from '../utils/android/utils.js'
 
 export async function checkAndroid() {
   const issues: string[] = []
@@ -45,7 +45,7 @@ export async function checkAndroid() {
     }
 
     const sdkRoot = process.env.ANDROID_SDK_ROOT || process.env.ANDROID_HOME
-    envValid = !!sdkRoot || (adbAvailable === true && (adbCheck.adbCmd && adbCheck.adbCmd !== 'adb'))
+    envValid = !!sdkRoot || (adbAvailable === true && !!(adbCheck.adbCmd && adbCheck.adbCmd !== 'adb'))
     if (!envValid) issues.push('ANDROID_SDK_ROOT/ANDROID_HOME missing and adb not found in PATH')
 
     const pkg = process.env.MCP_TARGET_PACKAGE || process.env.MCP_TARGET_APP_ID
