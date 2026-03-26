@@ -100,7 +100,10 @@ describe('system_status checks', () => {
     })
 
     const res = await systemStatus.getSystemStatus()
-    // system may still be considered successful if only iOS missing; allow either but ensure we didn't throw
-    assert(Array.isArray(res.issues))
+    // Expect iOS check to be false and Android to be healthy
+    assert.strictEqual(res.iosAvailable, false)
+    assert.strictEqual(res.adbAvailable, true)
+    // overall success may still be true (Android ok) but issues should include an xcrun-related message
+    assert(res.issues.some((i: string) => i.toLowerCase().includes('xcrun') || i.toLowerCase().includes('ios')))
   })
 })

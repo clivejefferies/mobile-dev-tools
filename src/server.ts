@@ -38,9 +38,7 @@ import { getSystemStatus } from './system/index.js'
 
 // Run a quick startup healthcheck (non-fatal) by calling getSystemStatus directly and log a short summary
 getSystemStatus().then(res => {
-  try {
-    console.debug('[startup] system status summary:', { adb: res.adbAvailable, ios: res.iosAvailable, devices: res.devices, iosDevices: res.iosDevices })
-  } catch {}
+  console.debug('[startup] system status summary:', { adb: res.adbAvailable, ios: res.iosAvailable, devices: res.devices, iosDevices: res.iosDevices })
 }).catch(e => console.warn('[startup] healthcheck failed:', e instanceof Error ? e.message : String(e)))
 
 function wrapResponse<T>(data: T) {

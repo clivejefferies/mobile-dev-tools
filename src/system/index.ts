@@ -5,8 +5,7 @@ export async function getSystemStatus() {
   try {
     const android = await checkAndroid()
     const ios = await checkIOS()
-    const issues = [...(android.issues || [])]
-    if (ios && (ios.issues || []).length) issues.push(...ios.issues)
+    const issues = [...android.issues, ...ios.issues]
 
     const success = issues.length === 0
     return {

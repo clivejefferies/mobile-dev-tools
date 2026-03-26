@@ -15,13 +15,13 @@ export async function checkAndroid() {
     const adbCheck = ensureAdbAvailable()
     const adbCmd = adbCheck.adbCmd || 'adb'
     adbAvailable = !!adbCheck.ok
-    adbVersion = adbCheck.version || ''
+    adbVersion = (adbCheck.version || '').toString().split('\n')[0]
     if (!adbAvailable) issues.push('ADB not available')
 
     try {
       const out = execSync(`${adbCmd} devices -l`, { encoding: 'utf8', timeout: 1500, stdio: ['ignore','pipe','ignore'] }).toString()
       const lines = out.split('\n').map(l => l.trim()).filter(Boolean)
-      const deviceLines = lines.filter(l => !l.startsWith('List of devices')).map(l => l)
+      const deviceLines = lines.filter(l => !l.startsWith('List of devices'))
       const stateCounts: Record<string, number> = {}
       for (const l of deviceLines) {
         const parts = l.split(/\s+/)
