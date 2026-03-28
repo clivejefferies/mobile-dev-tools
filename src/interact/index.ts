@@ -329,13 +329,14 @@ export class ToolsInteract {
               const isPresent = !!matched
               const conditionTrue = (match === 'present') ? isPresent : !isPresent
               if (conditionTrue) {
-                if (matchedAt === null) matchedAt = now
-                stableDuration = now - (matchedAt as number)
+                if (matchedAt === null) matchedAt = Date.now()
+                stableDuration = Date.now() - (matchedAt as number)
                 lastObservedState = true
                 if (stableDuration >= stability_ms) {
                   matchSource = 'ui-tree-' + (match === 'present' ? 'present' : 'absent')
                   const element = isPresent ? matched : null
-                  return { success: true, condition: match, query: q, poll_count: pollCount, duration_ms: now - start, stable_duration_ms: stableDuration, matchedElement: element, matchSource, timestamp: now, type: 'ui', observed_state: lastObservedState ?? null }
+                  const now2 = Date.now()
+                  return { success: true, condition: match, query: q, poll_count: pollCount, duration_ms: now2 - start, stable_duration_ms: stableDuration, matchedElement: element, matchSource, timestamp: now2, type: 'ui', observed_state: lastObservedState ?? null }
                 }
               } else {
                 matchedAt = null
@@ -413,6 +414,7 @@ export class ToolsInteract {
               }
             }
           } catch (err) { console.error('observeUntil(idle) error:', err) }
+        }
 
       // Respect poll interval and avoid tight loop
       await sleep(pollInterval)
@@ -430,9 +432,5 @@ export class ToolsInteract {
 
     const elapsed = Date.now() - start
     return { success: false, condition: match, query: q, poll_count: pollCount, duration_ms: elapsed, stable_duration_ms: stableDuration, error: 'Timeout waiting for condition', snapshot, observed_state: lastObservedState ?? null }
-  }
-
-}
-
-
+  }  
 }
