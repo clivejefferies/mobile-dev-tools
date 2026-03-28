@@ -29,7 +29,6 @@ interface UiElement {
   _interactable?: boolean
 }
 
-const STABLE_IDLE_MS = 1000
 
 export class ToolsInteract {
 
@@ -262,7 +261,7 @@ export class ToolsInteract {
     return { success: false, reason: 'timeout', lastFingerprint, elapsedMs: Date.now() - start }
   }
 
-  static async observeUntilHandler({ type = 'ui', query, timeoutMs = 30000, pollIntervalMs = 300, includeSnapshotOnFailure = true, match = 'present', stability_ms = 700, platform, deviceId }: { type?: 'ui' | 'log' | 'screen' | 'idle', query?: string, timeoutMs?: number, pollIntervalMs?: number, includeSnapshotOnFailure?: boolean, match?: 'present'|'absent', stability_ms?: number, platform?: 'android' | 'ios', deviceId?: string }) {
+  static async observeUntilHandler({ type = 'ui', query, timeoutMs = 30000, pollIntervalMs = 300, includeSnapshotOnFailure = true, match = 'present', stability_ms = 700, observationDelayMs = 0, platform, deviceId }: { type?: 'ui' | 'log' | 'screen' | 'idle', query?: string, timeoutMs?: number, pollIntervalMs?: number, includeSnapshotOnFailure?: boolean, match?: 'present'|'absent', stability_ms?: number, observationDelayMs?: number, platform?: 'android' | 'ios', deviceId?: string }) {
     const start = Date.now()
     const deadline = start + (timeoutMs || 0)
     const q = (query === null || query === undefined) ? '' : String(query)
@@ -270,21 +269,21 @@ export class ToolsInteract {
     // Clamp polling interval to 250-500ms for consistent behavior
     const pollInterval = Math.max(250, Math.min(pollIntervalMs || 300, 500))
 
-    // Baseline state
+    // Baseline state (fetch in parallel but bound to short timeouts so observation starts promptly)
     let initialFingerprint: string | null = null
-    try {
-      const fpRes = await ToolsObserve.getScreenFingerprintHandler({ platform, deviceId }) as ScreenFingerprintResponse | null
-      initialFingerprint = fpRes?.fingerprint ?? null
-    } catch (err) { console.error('observeUntil: error getting initial fingerprint', err); initialFingerprint = null }
-
-    // For logs, capture a baseline snapshot (count or last line) to avoid matching historical lines
     let baselineLastLine: string | null = null
     try {
-      const gl = await ToolsObserve.getLogsHandler({ platform, deviceId, lines: 200 })
-      const logsArr = Array.isArray((gl as any).logs) ? (gl as any).logs : []
-      baselineLastLine = logsArr.length ? logsArr[logsArr.length - 1] : null
+      const fpPromise = ToolsObserve.getScreenFingerprintHandler({ platform, deviceId }) as Promise<ScreenFingerprintResponse | null>
+      const logsPromise = ToolsObserve.getLogsHandler({ platform, deviceId, lines: 200 }) as Promise<any>
+      const withTimeout = (p: Promise<any>, ms: number) => Promise.race([p, new Promise(resolve => setTimeout(() => resolve(null), ms))])
+      const [fpRes, gl] = await Promise.all([withTimeout(fpPromise, 300), withTimeout(logsPromise, 500)])
+      if (fpRes && typeof fpRes === 'object') initialFingerprint = (fpRes as ScreenFingerprintResponse).fingerprint ?? null
+      if (gl) {
+        const logsArr = Array.isArray((gl as any).logs) ? (gl as any).logs : []
+        baselineLastLine = logsArr.length ? logsArr[logsArr.length - 1] : null
+      }
     } catch (err) {
-      try { console.warn('observeUntil: failed to get baseline logs (non-fatal):', err instanceof Error ? err.message : String(err)) } catch { }
+      try { console.warn('observeUntil: failed to get baseline data (non-fatal):', err instanceof Error ? err.message : String(err)) } catch { }
     }
 
     // Network-based waiting removed. Rely on UI and screen fingerprints for determinism.
@@ -292,6 +291,12 @@ export class ToolsInteract {
     let prevFingerprint = initialFingerprint
 
     const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
+
+    // Optional initial observation delay requested by caller
+    if (typeof observationDelayMs === 'number' && observationDelayMs > 0) {
+      try { console.log(`observeUntil: delaying observation for ${observationDelayMs}ms`) } catch { }
+      await sleep(observationDelayMs)
+    }
 
     // Telemetry
     let pollCount = 0
@@ -306,25 +311,38 @@ export class ToolsInteract {
         // Evaluate condition per type
         if (type === 'ui') {
           try {
-            const found = await ToolsInteract.findElementHandler({ query: q, exact: false, timeoutMs: Math.min(500, pollInterval), platform, deviceId })
-            const isPresent = !!(found && (found as any).found)
-            const conditionTrue = (match === 'present') ? isPresent : !isPresent
-
-            if (conditionTrue) {
-              if (matchedAt === null) matchedAt = now
-              stableDuration = now - (matchedAt as number)
-              lastObservedState = true
-              // require full stability window
-              if (stableDuration >= stability_ms) {
-                matchSource = 'ui-' + (match === 'present' ? 'present' : 'absent')
-                const element = isPresent ? (found as any).element : null
-                return { success: true, condition: match, query: q, poll_count: pollCount, duration_ms: now - start, stable_duration_ms: stableDuration, matchedElement: element, matchSource, timestamp: now, type: 'ui' }
+                // Lightweight UI check: fetch UI tree and perform a normalized substring match to reduce overhead
+            try {
+              // Bound the UI tree fetch to avoid long blocking calls; prefer quick failure over hanging a poll
+              const withTimeout = (p: Promise<any>, ms: number) => Promise.race([p, new Promise(resolve => setTimeout(()=>resolve(null), ms))])
+              const tree = await withTimeout(ToolsObserve.getUITreeHandler({ platform, deviceId }), Math.min(pollInterval, 500)) as any
+              const elems = Array.isArray(tree && tree.elements) ? tree.elements : []
+              const qnorm = q.toLowerCase()
+              let matched: any = null
+              for (const el of elems) {
+                try {
+                  const txt = ((el && (el.text || el.label || el.value || el.contentDescription || el.accessibilityLabel)) || '')
+                  if (!txt) continue
+                  if (String(txt).toLowerCase().includes(qnorm)) { matched = el; break }
+                } catch { continue }
               }
-            } else {
-              matchedAt = null
-              stableDuration = 0
-              lastObservedState = false
-            }
+              const isPresent = !!matched
+              const conditionTrue = (match === 'present') ? isPresent : !isPresent
+              if (conditionTrue) {
+                if (matchedAt === null) matchedAt = now
+                stableDuration = now - (matchedAt as number)
+                lastObservedState = true
+                if (stableDuration >= stability_ms) {
+                  matchSource = 'ui-tree-' + (match === 'present' ? 'present' : 'absent')
+                  const element = isPresent ? matched : null
+                  return { success: true, condition: match, query: q, poll_count: pollCount, duration_ms: now - start, stable_duration_ms: stableDuration, matchedElement: element, matchSource, timestamp: now, type: 'ui', observed_state: lastObservedState ?? null }
+                }
+              } else {
+                matchedAt = null
+                stableDuration = 0
+                lastObservedState = false
+              }
+            } catch (err) { console.error('observeUntil(ui) tree error:', err) }
           } catch (err) { console.error('observeUntil(ui) find error:', err) }
         } else if (type === 'log') {
           try {
@@ -335,7 +353,7 @@ export class ToolsInteract {
               const msg = ent && (ent.message || ent.msg || ent) ? (ent.message || ent.msg || ent) : ''
               if (q && String(msg).includes(q)) {
                 const now2 = Date.now()
-                return { success: true, condition: 'present', query: q, poll_count: pollCount, duration_ms: now2 - start, stable_duration_ms: 0, matchedLog: { message: msg, raw: ent }, matchSource: 'log-stream', timestamp: now2, type: 'log' }
+                return { success: true, condition: 'present', query: q, poll_count: pollCount, duration_ms: now2 - start, stable_duration_ms: 0, matchedLog: { message: msg, raw: ent }, matchSource: 'log-stream', timestamp: now2, type: 'log', observed_state: true }
               }
             }
 
@@ -350,7 +368,7 @@ export class ToolsInteract {
               const line = logsArr[i]
               if (q && String(line).includes(q)) {
                 const now2 = Date.now()
-                return { success: true, condition: 'present', query: q, poll_count: pollCount, duration_ms: now2 - start, stable_duration_ms: 0, matchedLog: { message: line }, matchSource: 'log-snapshot', timestamp: now2, type: 'log' }
+                return { success: true, condition: 'present', query: q, poll_count: pollCount, duration_ms: now2 - start, stable_duration_ms: 0, matchedLog: { message: line }, matchSource: 'log-snapshot', timestamp: now2, type: 'log', observed_state: true }
               }
             }
           } catch (err) { console.error('observeUntil(log) error:', err) }
@@ -367,7 +385,7 @@ export class ToolsInteract {
                 lastObservedState = true
                 if (stableDuration >= stability_ms) {
                   const now2 = Date.now()
-                  return { success: true, condition: 'present', query: q, poll_count: pollCount, duration_ms: now2 - start, stable_duration_ms: stableDuration, newFingerprint: fp, matchSource: 'screen-fingerprint', timestamp: now2, type: 'screen' }
+                  return { success: true, condition: 'present', query: q, poll_count: pollCount, duration_ms: now2 - start, stable_duration_ms: stableDuration, newFingerprint: fp, matchSource: 'screen-fingerprint', timestamp: now2, type: 'screen', observed_state: lastObservedState ?? null }
                 }
               } else {
                 matchedAt = null
@@ -391,7 +409,7 @@ export class ToolsInteract {
               lastObservedState = true
               if (idleMs >= stability_ms) {
                 const now2 = Date.now()
-                return { success: true, condition: 'present', query: q, poll_count: pollCount, duration_ms: now2 - start, stable_duration_ms: idleMs, matchSource: 'idle-stable', timestamp: now2, type: 'idle' }
+                return { success: true, condition: 'present', query: q, poll_count: pollCount, duration_ms: now2 - start, stable_duration_ms: idleMs, matchSource: 'idle-stable', timestamp: now2, type: 'idle', observed_state: lastObservedState ?? null }
               }
             }
           } catch (err) { console.error('observeUntil(idle) error:', err) }
@@ -411,7 +429,7 @@ export class ToolsInteract {
     }
 
     const elapsed = Date.now() - start
-    return { success: false, condition: match, query: q, poll_count: pollCount, duration_ms: elapsed, stable_duration_ms: stableDuration, error: 'Timeout waiting for condition', snapshot }
+    return { success: false, condition: match, query: q, poll_count: pollCount, duration_ms: elapsed, stable_duration_ms: stableDuration, error: 'Timeout waiting for condition', snapshot, observed_state: lastObservedState ?? null }
   }
 
 }
