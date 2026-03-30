@@ -146,13 +146,78 @@ export class iOSObserve {
       
       const buffer = await fs.readFile(tmpFile)
       const base64 = buffer.toString('base64')
-      
-      await fs.rm(tmpFile).catch(() => {})
 
+      // Attempt to parse PNG dimensions from the file to return a usable resolution
+      function parsePngSize(buf: Buffer): { width: number, height: number } {
+        try {
+          if (!buf || buf.length < 24) return { width: 0, height: 0 }
+          if (buf.readUInt32BE(0) !== 0x89504e47 || buf.readUInt32BE(4) !== 0x0d0a1a0a) return { width: 0, height: 0 }
+          const ihdr = buf.toString('ascii', 12, 16)
+          if (ihdr !== 'IHDR') return { width: 0, height: 0 }
+          const width = buf.readUInt32BE(16)
+          const height = buf.readUInt32BE(20)
+          return { width, height }
+        } catch {
+          return { width: 0, height: 0 }
+        }
+      }
+
+      const dims = parsePngSize(buffer)
+
+      // Try to generate WebP (preferred) and JPEG fallback using sharp (in-process, cross-platform)
+      try {
+        const sharpModule = await import('sharp'); const sharp = sharpModule && (sharpModule as any).default ? (sharpModule as any).default : sharpModule;
+        const img = sharp(buffer);
+        const meta = await img.metadata().catch((err: any) => { console.error('sharp.metadata failed:', err); return {} as any });
+
+        // If image has alpha channel, prefer lossless PNG to preserve transparency
+        const hasAlpha = !!meta.hasAlpha || (meta.channels && meta.channels > 3);
+
+        // Generate WebP and JPEG buffers; log failures
+        let webpBuf: Buffer | null = null;
+        let jpegBuf: Buffer | null = null;
+        try {
+          webpBuf = await img.webp({ quality: 80 }).toBuffer();
+        } catch (err) {
+          console.error('WebP conversion failed (iOS):', err instanceof Error ? err.message : String(err));
+          webpBuf = null;
+        }
+        try {
+          jpegBuf = await img.jpeg({ quality: 80 }).toBuffer();
+        } catch (err) {
+          console.error('JPEG conversion failed (iOS):', err instanceof Error ? err.message : String(err));
+          jpegBuf = null;
+        }
+
+        await fs.rm(tmpFile).catch(() => {});
+
+        if (hasAlpha) {
+          // preserve alpha: return PNG if WebP not available
+          if (webpBuf) {
+            return { device, screenshot: webpBuf.toString('base64'), screenshot_mime: 'image/webp', screenshot_fallback: base64, screenshot_fallback_mime: 'image/png', resolution: { width: dims.width, height: dims.height } }
+          }
+          // if webp unavailable, return original PNG
+          return { device, screenshot: base64, screenshot_mime: 'image/png', resolution: { width: dims.width, height: dims.height } }
+        }
+
+        // No alpha: prefer webp, fall back to jpeg
+        if (webpBuf) {
+          return { device, screenshot: webpBuf.toString('base64'), screenshot_mime: 'image/webp', screenshot_fallback: jpegBuf ? jpegBuf.toString('base64') : undefined, screenshot_fallback_mime: jpegBuf ? 'image/jpeg' : undefined, resolution: { width: dims.width, height: dims.height } }
+        }
+        if (jpegBuf) {
+          return { device, screenshot: jpegBuf.toString('base64'), screenshot_mime: 'image/jpeg', resolution: { width: dims.width, height: dims.height } }
+        }
+      } catch {
+        console.error('Screenshot conversion pipeline failed (iOS):', e instanceof Error ? e.message : String(e));
+        // fall through to png fallback
+      }
+
+      await fs.rm(tmpFile).catch(() => {})
       return {
         device,
         screenshot: base64,
-        resolution: { width: 0, height: 0 },
+        screenshot_mime: 'image/png',
+        resolution: { width: dims.width, height: dims.height },
       }
     } catch (e) {
       await fs.rm(tmpFile).catch(() => {})

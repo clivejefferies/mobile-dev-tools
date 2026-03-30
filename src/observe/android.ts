@@ -142,7 +142,7 @@ export class AndroidObserve {
         reject(new Error(`ADB screencap timed out after 10s`))
       }, 10000)
 
-      child.on('close', (code) => {
+      child.on('close', async (code) => {
         clearTimeout(timeout)
         if (code !== 0) {
           reject(new Error(stderr.trim() || `Screencap failed with code ${code}`))
@@ -152,28 +152,108 @@ export class AndroidObserve {
         const screenshotBuffer = Buffer.concat(chunks)
         const screenshotBase64 = screenshotBuffer.toString('base64')
 
-        execAdb(['shell', 'wm', 'size'], deviceId)
-          .then(sizeStdout => {
-            let width = 0
-            let height = 0
-            const match = sizeStdout.match(/Physical size: (\d+)x(\d+)/)
-            if (match) {
-              width = parseInt(match[1], 10)
-              height = parseInt(match[2], 10)
+        // Try to parse PNG dimensions from the screenshot buffer (fast, no deps)
+        function parsePngSize(buf: Buffer): { width: number, height: number } {
+          try {
+            if (!buf || buf.length < 24) return { width: 0, height: 0 }
+            // PNG header check
+            if (buf.readUInt32BE(0) !== 0x89504e47 || buf.readUInt32BE(4) !== 0x0d0a1a0a) return { width: 0, height: 0 }
+            // IHDR chunk should start at offset 12
+            const ihdr = buf.toString('ascii', 12, 16)
+            if (ihdr !== 'IHDR') return { width: 0, height: 0 }
+            const width = buf.readUInt32BE(16)
+            const height = buf.readUInt32BE(20)
+            return { width, height }
+          } catch {
+            return { width: 0, height: 0 }
+          }
+        }
+
+        const parsed = parsePngSize(Buffer.concat(chunks))
+        if (parsed.width > 0 && parsed.height > 0) {
+          // Attempt to convert to WebP (preferred) and provide JPEG fallback (awaited to avoid race)
+          try {
+            const sharpModule = await import('sharp'); const sharp = sharpModule && (sharpModule as any).default ? (sharpModule as any).default : sharpModule;
+            const buf = Buffer.concat(chunks);
+            const img = sharp(buf);
+            const meta = await img.metadata().catch((err: any) => { console.error('sharp.metadata failed (Android):', err); return {} as any });
+            const hasAlpha = !!meta.hasAlpha || (meta.channels && meta.channels > 3);
+
+            let webpBuf: Buffer | null = null;
+            let jpegBuf: Buffer | null = null;
+            try {
+              webpBuf = await img.webp({ quality: 80 }).toBuffer();
+            } catch (err) {
+              console.error('WebP conversion failed (Android):', err instanceof Error ? err.message : String(err));
+              webpBuf = null;
             }
-            resolve({
-              device: deviceInfo,
-              screenshot: screenshotBase64,
-              resolution: { width, height }
+            try {
+              jpegBuf = await img.jpeg({ quality: 80 }).toBuffer();
+            } catch (err) {
+              console.error('JPEG conversion failed (Android):', err instanceof Error ? err.message : String(err));
+              jpegBuf = null;
+            }
+
+            if (hasAlpha) {
+              if (webpBuf) {
+                const webpB64 = webpBuf.toString('base64')
+                const jpegB64 = jpegBuf ? jpegBuf.toString('base64') : null
+                resolve({ device: deviceInfo, screenshot: webpB64, screenshot_mime: 'image/webp', screenshot_fallback: jpegB64, screenshot_fallback_mime: jpegB64 ? 'image/jpeg' : undefined, resolution: { width: parsed.width, height: parsed.height } } as any)
+                return
+              }
+              const pngB64 = buf.toString('base64')
+              resolve({ device: deviceInfo, screenshot: pngB64, screenshot_mime: 'image/png', resolution: { width: parsed.width, height: parsed.height } })
+              return
+            }
+
+            if (webpBuf) {
+              const webpB64 = webpBuf.toString('base64')
+              const jpegB64 = jpegBuf ? jpegBuf.toString('base64') : null
+              resolve({ device: deviceInfo, screenshot: webpB64, screenshot_mime: 'image/webp', screenshot_fallback: jpegB64, screenshot_fallback_mime: jpegB64 ? 'image/jpeg' : undefined, resolution: { width: parsed.width, height: parsed.height } } as any)
+              return
+            }
+
+            if (jpegBuf) {
+              resolve({ device: deviceInfo, screenshot: jpegBuf.toString('base64'), screenshot_mime: 'image/jpeg', resolution: { width: parsed.width, height: parsed.height } })
+              return
+            }
+
+            // No conversions succeeded; return original PNG
+            resolve({ device: deviceInfo, screenshot: screenshotBase64, screenshot_mime: 'image/png', resolution: { width: parsed.width, height: parsed.height } })
+            return
+          } catch (err) {
+            console.error('Screenshot conversion pipeline failed (Android):', err instanceof Error ? err.message : String(err));
+            // Conversion failed - fall back to original PNG with parsed resolution
+            resolve({ device: deviceInfo, screenshot: screenshotBase64, screenshot_mime: 'image/png', resolution: { width: parsed.width, height: parsed.height } })
+            return
+          }
+        } else {
+          // Fallback to querying wm size if parsing failed
+          execAdb(['shell', 'wm', 'size'], deviceId)
+            .then(sizeStdout => {
+              let width = 0
+              let height = 0
+              const match = sizeStdout.match(/Physical size: (\d+)x(\d+)/)
+              if (match) {
+                width = parseInt(match[1], 10)
+                height = parseInt(match[2], 10)
+              }
+              resolve({
+                device: deviceInfo,
+                screenshot: screenshotBase64,
+                screenshot_mime: 'image/png',
+                resolution: { width, height }
+              })
             })
-          })
-          .catch(() => {
-             resolve({
-              device: deviceInfo,
-              screenshot: screenshotBase64,
-              resolution: { width: 0, height: 0 }
+            .catch(() => {
+               resolve({
+                device: deviceInfo,
+                screenshot: screenshotBase64,
+                screenshot_mime: 'image/png',
+                resolution: { width: 0, height: 0 }
+              })
             })
-          })
+        }
       })
 
       child.on('error', (err) => {

@@ -50,6 +50,9 @@ export interface GetCrashResponse {
 export interface CaptureAndroidScreenResponse {
   device: DeviceInfo;
   screenshot: string; // base64 encoded string
+  screenshot_mime?: string; // e.g. image/webp, image/jpeg, image/png
+  screenshot_fallback?: string; // optional fallback base64 (e.g., jpeg)
+  screenshot_fallback_mime?: string;
   resolution: {
     width: number;
     height: number;
@@ -59,6 +62,9 @@ export interface CaptureAndroidScreenResponse {
 export interface CaptureIOSScreenshotResponse {
   device: DeviceInfo;
   screenshot: string; // base64 encoded string
+  screenshot_mime?: string; // e.g. image/webp, image/jpeg, image/png
+  screenshot_fallback?: string; // optional fallback base64 (e.g., jpeg)
+  screenshot_fallback_mime?: string;
   resolution: {
     width: number;
     height: number;

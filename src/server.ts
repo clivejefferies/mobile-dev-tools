@@ -628,12 +628,17 @@ server.setRequestHandler(CallToolRequestSchema, async (request: SchemaOutput<typ
     if (name === "capture_screenshot") {
       const { platform, deviceId } = args as any
       const res = await ToolsObserve.captureScreenshotHandler({ platform, deviceId })
-      return {
-        content: [
-          { type: 'text', text: JSON.stringify({ device: res.device, result: { resolution: (res as any).resolution } }, null, 2) },
-          { type: 'image', data: (res as any).screenshot, mimeType: 'image/png' }
-        ]
+      const mime = (res as any).screenshot_mime || 'image/png'
+      const content: any[] = [
+        { type: 'text', text: JSON.stringify({ device: res.device, result: { resolution: (res as any).resolution, mimeType: mime } }, null, 2) },
+        { type: 'image', data: (res as any).screenshot, mimeType: mime }
+      ]
+      // If a jpeg fallback is available, include a small note and the fallback as an additional image block for compatibility
+      if ((res as any).screenshot_fallback) {
+        content.push({ type: 'text', text: JSON.stringify({ note: 'JPEG fallback included for compatibility', mimeType: (res as any).screenshot_fallback_mime || 'image/jpeg' }) })
+        content.push({ type: 'image', data: (res as any).screenshot_fallback, mimeType: (res as any).screenshot_fallback_mime || 'image/jpeg' })
       }
+      return { content }
     }
 
     if (name === "capture_debug_snapshot") {

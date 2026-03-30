@@ -1,6 +1,6 @@
 {
   "name": "mobile-debug-mcp",
-  "version": "0.21.1",
+  "version": "0.21.2",
   "description": "MCP server for mobile app debugging (Android + iOS), with focus on security and reliability",
   "type": "module",
   "bin": {
@@ -27,7 +27,8 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
     "fast-xml-parser": "^5.5.1",
-    "zod": "^3.22.4"
+    "zod": "^3.22.4",
+    "sharp": "^0.32.1"
   },
   "devDependencies": {
     "@types/node": "^25.4.0",
