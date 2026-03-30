@@ -171,7 +171,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
 
     {
       name: "get_logs",
-      description: "Get recent logs from Android or iOS simulator. Returns device metadata and the log output.",
+      description: "Get recent logs from Android or iOS simulator. Returns device metadata and structured logs suitable for AI consumption.",
       inputSchema: {
         type: "object",
         properties: {
@@ -187,9 +187,15 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
             type: "string",
             description: "Device UDID (iOS) or Serial (Android). Defaults to booted/connected."
           },
+          pid: { type: "number", description: "Filter by process id" },
+          tag: { type: "string", description: "Filter by tag (Android) or subsystem/category (iOS)" },
+          level: { type: "string", description: "Log level filter (VERBOSE, DEBUG, INFO, WARN, ERROR)" },
+          contains: { type: "string", description: "Substring to match in log message" },
+          since_seconds: { type: "number", description: "Only return logs from the last N seconds" },
+          limit: { type: "number", description: "Override default number of returned lines" },
           lines: {
             type: "number",
-            description: "Number of log lines (android only)"
+            description: "Legacy - number of log lines (android only)"
           }
         },
         required: ["platform"]
@@ -603,12 +609,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request: SchemaOutput<typ
 
 
     if (name === "get_logs") {
-      const { platform, appId, deviceId, lines } = args as any
-      const res = await ToolsObserve.getLogsHandler({ platform, appId, deviceId, lines })
+      const { platform, appId, deviceId, pid, tag, level, contains, since_seconds, limit, lines } = args as any
+      const res = await ToolsObserve.getLogsHandler({ platform, appId, deviceId, pid, tag, level, contains, since_seconds, limit, lines })
+      const filtered = !!(pid || tag || level || contains || since_seconds || appId)
       return {
         content: [
-          { type: 'text', text: JSON.stringify({ device: res.device, result: { lines: res.logs.length, crashLines: res.crashLines.length > 0 ? res.crashLines : undefined } }, null, 2) },
-          { type: 'text', text: (res.logs || []).join('\n') }
+          { type: 'text', text: JSON.stringify({ device: res.device, result: { count: res.logCount, filtered, crashLines: (res.crashLines || []) } }, null, 2) },
+          { type: 'text', text: JSON.stringify({ logs: res.logs }, null, 2) }
         ]
       }
     }

@@ -38,18 +38,29 @@ export class ToolsObserve {
     return await (observe as AndroidObserve).getCurrentScreen(resolved.id)
   }
 
-  static async getLogsHandler({ platform, appId, deviceId, lines }: { platform?: 'android' | 'ios', appId?: string, deviceId?: string, lines?: number }) {
+  static async getLogsHandler({ platform, appId, deviceId, pid, tag, level, contains, since_seconds, limit, lines }: { platform?: 'android' | 'ios', appId?: string, deviceId?: string, pid?: number, tag?: string, level?: string, contains?: string, since_seconds?: number, limit?: number, lines?: number }) {
     const { observe, resolved } = await ToolsObserve.resolveObserve(platform, deviceId, appId)
+    const filters = { appId, deviceId: resolved.id, pid, tag, level, contains, since_seconds, limit: limit ?? lines }
+
+    // Validate filters
+    if (level && !['VERBOSE','DEBUG','INFO','WARN','ERROR'].includes(level.toString().toUpperCase())) {
+      return { device: resolved, logs: [], crashLines: [], logCount: 0, error: { code: 'INVALID_FILTER', message: `Unsupported level filter: ${level}` } } as any
+    }
+
     if (observe instanceof AndroidObserve) {
-      const response = await observe.getLogs(appId, lines ?? 200, resolved.id)
+      const response = await observe.getLogs(filters)
       const logs = Array.isArray(response.logs) ? response.logs : []
-      const crashLines = logs.filter(line => line.includes('FATAL EXCEPTION'))
-      return { device: response.device, logs, crashLines }
+      const crashLines = logs.filter(entry => /FATAL EXCEPTION/i.test(entry.message))
+      const anyFilterApplied = !!(appId || pid || tag || level || contains || since_seconds)
+      if (anyFilterApplied && logs.length === 0) return { device: response.device, logs: [], crashLines: [], logCount: 0, error: { code: 'LOGS_UNAVAILABLE', message: 'No logs match filters' } } as any
+      return { device: response.device, logs, crashLines, logCount: response.logCount }
     } else {
-      const resp = await (observe as iOSObserve).getLogs(appId, resolved.id)
+      const resp = await (observe as iOSObserve).getLogs(filters)
       const logs = Array.isArray(resp.logs) ? resp.logs : []
-      const crashLines = logs.filter(l => l.includes('FATAL EXCEPTION'))
-      return { device: resp.device, logs, crashLines }
+      const crashLines = logs.filter(entry => /FATAL EXCEPTION/i.test(entry.message))
+      const anyFilterApplied = !!(appId || pid || tag || level || contains || since_seconds)
+      if (anyFilterApplied && logs.length === 0) return { device: resp.device, logs: [], crashLines: [], logCount: 0, error: { code: 'LOGS_UNAVAILABLE', message: 'No logs match filters' } } as any
+      return { device: resp.device, logs, crashLines, logCount: resp.logCount }
     }
   }
 
@@ -96,7 +107,7 @@ export class ToolsObserve {
 
     // Parallel fetches for performance: screenshot, current screen, fingerprint, ui tree, and log stream/get logs
     const sid = sessionId || 'default'
-    const tasks = {
+    const tasks: Record<string, Promise<any>> = {
       screenshot: ToolsObserve.captureScreenshotHandler({ platform, deviceId }),
       currentScreen: (!platform || platform === 'android') ? ToolsObserve.getCurrentScreenHandler({ deviceId }) : Promise.resolve(null),
       fingerprint: ToolsObserve.getScreenFingerprintHandler({ platform, deviceId }),
@@ -145,10 +156,20 @@ export class ToolsObserve {
         let entries: any[] = Array.isArray(out._streamEntries) ? out._streamEntries : []
         if (!entries || entries.length === 0) {
           const gl = await ToolsObserve.getLogsHandler({ platform, appId, deviceId, lines: logLines })
-          const raw: string[] = (gl && (gl as any).logs) ? (gl as any).logs : []
-          entries = raw.slice(-Math.max(0, logLines)).map(line => {
-            const level = /\b(FATAL EXCEPTION|ERROR| E )\b/i.test(line) ? 'ERROR' : /\b(WARN| W )\b/i.test(line) ? 'WARN' : 'INFO'
-            return { timestamp: null, level, message: line }
+          const raw: any[] = (gl && (gl as any).logs) ? (gl as any).logs : []
+          // raw may be structured entries or strings
+          entries = raw.slice(-Math.max(0, logLines)).map(item => {
+            if (!item) return { timestamp: null, level: 'INFO', message: '' }
+            if (typeof item === 'string') {
+              const level = /\b(FATAL EXCEPTION|ERROR| E )\b/i.test(item) ? 'ERROR' : /\b(WARN| W )\b/i.test(item) ? 'WARN' : 'INFO'
+              return { timestamp: null, level, message: item }
+            }
+            const msg = item.message || item.msg || JSON.stringify(item)
+            const levelRaw = item.level || item.levelName || item._level || ''
+            const level = (levelRaw && String(levelRaw)).toUpperCase() || (/\bERROR\b/i.test(msg) ? 'ERROR' : /\bWARN\b/i.test(msg) ? 'WARN' : 'INFO')
+            const ts = item.timestamp || item._iso || null
+            const tsNum = (ts && typeof ts === 'string') ? (isNaN(new Date(ts).getTime()) ? null : new Date(ts).getTime()) : (typeof ts === 'number' ? ts : null)
+            return { timestamp: tsNum, level, message: msg }
           })
         } else {
           entries = entries.map(ent => {

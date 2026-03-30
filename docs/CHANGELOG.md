@@ -2,6 +2,9 @@
 
 All notable changes to the **Mobile Debug MCP** project will be documented in this file.
 
+## [0.21.3]
+- Added structured logs
+
 ## [0.21.2]
 - Fixed screenshots not working, imnproved tool
 

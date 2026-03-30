@@ -121,20 +121,132 @@ export class iOSObserve {
     return getIOSDeviceMetadata(deviceId);
   }
 
-  async getLogs(appId?: string, deviceId: string = "booted"): Promise<GetLogsResponse> {
-    const args = ['simctl', 'spawn', deviceId, 'log', 'show', '--style', 'syslog', '--last', '1m']
+  async getLogs(filters: { appId?: string, deviceId?: string, pid?: number, tag?: string, level?: string, contains?: string, since_seconds?: number, limit?: number } = {}): Promise<GetLogsResponse> {
+    const { appId, deviceId = 'booted', pid, tag, level, contains, since_seconds, limit } = filters
+    const args: string[] = ['simctl', 'spawn', deviceId, 'log', 'show', '--style', 'syslog']
+
+    // Default to last N seconds if no since_seconds provided; limit lines handled after parsing
+    const effectiveLimit = typeof limit === 'number' && limit > 0 ? limit : 50
+
+    if (since_seconds) {
+      // log show accepts --last <time>
+      args.push('--last', `${since_seconds}s`)
+    } else {
+      // default to last 60s to keep quick
+      args.push('--last', '60s')
+    }
+
     if (appId) {
       validateBundleId(appId)
+      // constrain to subsystem or process matching appId
       args.push('--predicate', `subsystem contains "${appId}" or process == "${appId}"`)
+    } else if (tag) {
+      // predicate by subsystem/category
+      args.push('--predicate', `subsystem contains "${tag}"`)
     }
-    
-    const result = await execCommand(args, deviceId)
-    const device = await getIOSDeviceMetadata(deviceId)
-    const logs = result.output ? result.output.split('\n') : []
-    return {
-      device,
-      logs,
-      logCount: logs.length,
+
+    try {
+      const result = await execCommand(args, deviceId)
+      const device = await getIOSDeviceMetadata(deviceId)
+      const rawLines = result.output ? result.output.split(/\r?\n/).filter(Boolean) : []
+
+      // Parse lines into structured entries. iOS log format: timestamp [PID:tid] <level> subsystem:category: message
+      const parsed = rawLines.map(line => {
+        // Example: 2023-08-12 12:34:56.789012+0000  pid  <Debug>  MyApp[123:456]  <info>  MySubsystem: MyCategory: Message here
+        // Simpler approach: try to extract ISO timestamp at start
+        let ts: string | null = null
+        const tsMatch = line.match(/^(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}(?:\.\d+)?)/)
+        if (tsMatch) {
+          const d = new Date(tsMatch[1])
+          if (!isNaN(d.getTime())) ts = d.toISOString()
+        }
+
+        // level mapping
+        let lvl = 'INFO'
+        const lvlMatch = line.match(/\b(Debug|Info|Default|Error|Fault|Warning)\b/i)
+        if (lvlMatch) {
+          const map: Record<string, string> = { 'debug': 'DEBUG', 'info': 'INFO', 'default': 'DEBUG', 'error': 'ERROR', 'fault': 'ERROR', 'warning': 'WARN' }
+          lvl = map[(lvlMatch[1] || '').toLowerCase()] || 'INFO'
+        }
+
+        // subsystem/category -> tag
+        let tagVal = ''
+        const tagMatch = line.match(/\s([A-Za-z0-9_./-]+):\s/)
+        if (tagMatch) tagVal = tagMatch[1]
+
+        // pid extraction
+        let pidNum: number | null = null
+        const pidMatch = line.match(/\[(\d+):\d+\]/)
+        if (pidMatch) pidNum = Number(pidMatch[1])
+
+        // message: extract robustly after the subsystem/category token when available
+        let message = line
+        if (tagMatch) {
+          // tagMatch[0] includes the delimiter (e.g. " MySubsystem: ") — use it to find the message start
+          const marker = tagMatch[0]
+          const idx = line.indexOf(marker)
+          if (idx !== -1) {
+            message = line.slice(idx + marker.length).trim()
+          } else {
+            // fallback: try to trim off common prefixes (timestamp, pid, level) and keep the rest
+            const afterPidMatch = line.match(/\]\s+/)
+            if (afterPidMatch) {
+              const afterPidIdx = line.indexOf(afterPidMatch[0]) + afterPidMatch[0].length
+              message = line.slice(afterPidIdx).trim()
+            } else {
+              // remove leading level tokens like <Debug> and keep remainder
+              message = line.replace(/^.*?<.*?>\s*/,'').trim()
+            }
+          }
+        } else {
+          // No tag found — strip obvious prefixes and keep remainder (preserve colons in message)
+          message = line.replace(/^.*?<.*?>\s*/,'').trim()
+        }
+
+        return { timestamp: ts, level: lvl, tag: tagVal, pid: pidNum, message }
+      })
+
+      // Apply contains filter
+      let filtered = parsed
+      if (contains) filtered = filtered.filter(e => e.message && e.message.includes(contains))
+
+      // Apply since_seconds already applied by log show, but double-check timestamps
+      if (since_seconds) {
+        const sinceMs = Date.now() - (since_seconds * 1000)
+        filtered = filtered.filter(e => e.timestamp && (new Date(e.timestamp).getTime() >= sinceMs))
+      }
+
+      // level filter
+      if (level) {
+        const L = level.toUpperCase()
+        filtered = filtered.filter(e => e.level && e.level.toUpperCase() === L)
+      }
+
+      // tag filter
+      if (tag) filtered = filtered.filter(e => e.tag && e.tag.includes(tag))
+
+      // pid filter
+      if (pid) filtered = filtered.filter(e => e.pid === pid)
+
+      // If appId present but no predicate returned lines, try substring match
+      if (appId && filtered.length === 0) {
+        const matched = parsed.filter(e => (e.message && e.message.includes(appId)) || (e.tag && e.tag.includes(appId)))
+        if (matched.length > 0) filtered = matched
+      }
+
+      // Order oldest -> newest
+      filtered.sort((a,b) => {
+        const ta = a.timestamp ? new Date(a.timestamp).getTime() : 0
+        const tb = b.timestamp ? new Date(b.timestamp).getTime() : 0
+        return ta - tb
+      })
+
+      const limited = filtered.slice(-Math.max(0, effectiveLimit))
+      return { device, logs: limited, logCount: limited.length }
+    } catch (err) {
+      console.error('iOS getLogs failed:', err)
+      const device = await getIOSDeviceMetadata(deviceId)
+      return { device, logs: [], logCount: 0 }
     }
   }
 

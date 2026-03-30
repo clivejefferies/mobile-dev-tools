@@ -36,9 +36,17 @@ export interface ResetAppDataResponse {
   diagnostics?: any;
 }
 
+export interface StructuredLogEntry {
+  timestamp: string | null; // ISO string
+  level: string; // VERBOSE, DEBUG, INFO, WARN, ERROR
+  tag: string;
+  pid: number | null;
+  message: string;
+}
+
 export interface GetLogsResponse {
   device: DeviceInfo;
-  logs: string[];
+  logs: StructuredLogEntry[];
   logCount: number;
 }
 

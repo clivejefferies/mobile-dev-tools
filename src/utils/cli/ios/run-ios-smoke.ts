@@ -17,7 +17,7 @@ async function main() {
     console.log('screenshot OK? size:', shot && shot.screenshot ? shot.screenshot.length : 0)
 
     console.log('[3] getLogs')
-    const logs = await obs.getLogs(appId, undefined);
+    const logs = await obs.getLogs({ appId, deviceId });
     console.log('logs count:', logs.logCount)
 
     console.log('[4] terminateApp')

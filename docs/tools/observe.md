@@ -3,27 +3,32 @@
 Tools that retrieve device state, logs, screenshots and UI hierarchies.
 
 ## get_logs
-Fetch recent logs from the app or device.
 
-Input:
+Fetch recent logs as structured entries optimized for AI agents.
 
-```json
-{ "platform": "android", "appId": "com.example.app", "deviceId": "emulator-5554", "lines": 200 }
-```
-
-Response (metadata):
+Input (example):
 
 ```json
-{ "entries": 200, "crash_summary": { "crash_detected": false } }
+{ "platform": "android|ios", "appId": "com.example.app", "deviceId": "emulator-5554", "pid": 1234, "tag": "MyTag", "level": "ERROR", "contains": "timeout", "since_seconds": 60, "limit": 50 }
 ```
 
-Followed by a raw log plain text block.
+Defaults:
+
+- No filters → return the most recent 50 log entries (app-scoped if appId provided), across all levels.
+
+Response (structured):
+
+```json
+{ "device": { "platform": "android", "id": "emulator-5554" }, "logs": [ { "timestamp": "2026-03-30T16:00:00.000Z", "level": "ERROR", "tag": "MyTag", "pid": 1234, "message": "Something failed" } ], "count": 1, "filtered": true }
+```
 
 Notes:
-- Android log parsing includes basic crash detection (searching for "FATAL EXCEPTION" and exception names).
-- Use `lines` to control how many log lines are returned from `adb logcat`.
 
----
+- Each log entry: timestamp (ISO), level (VERBOSE|DEBUG|INFO|WARN|ERROR), tag (string), pid (number|null), message (string).
+- Logs ordered oldest → newest. count equals number of entries returned. filtered is true if any filter was applied.
+- Supported filters: pid, tag, level, contains, since_seconds, limit.
+- Platform behaviour: Android uses `adb logcat` with source-side filters where possible; iOS uses unified logging (`log show`/simctl) and maps subsystem/category → tag.
+- Errors are returned as structured objects with `error.code` and `error.message`. Possible codes: LOGS_UNAVAILABLE, INVALID_FILTER, PLATFORM_NOT_SUPPORTED, INTERNAL_ERROR.
 
 ## capture_screenshot
 Capture screen. Returns JSON metadata then an image/png block with base64 PNG data.
